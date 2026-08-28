@@ -808,8 +808,24 @@
     else el.textContent = '';
   }
 
+  // Vrai si un panneau que l'utilisateur est en train de remplir (pièces jointes, révision
+  // IRL) est actuellement ouvert à l'écran. Dans ce cas, on évite de redessiner toute la
+  // page pendant une resynchronisation silencieuse : ça fermerait le panneau sous les pieds
+  // de l'utilisateur, y compris juste après qu'il ait choisi un fichier à joindre.
+  function hasOpenWorkPanel(){
+    const rows = document.querySelectorAll('[id^="attRow-"], [id^="irlRow-"]');
+    for(const row of rows){
+      if(row.style.display && row.style.display !== 'none') return true;
+    }
+    return false;
+  }
+
   async function fetchRemoteData({ silent } = {}){
     try{
+      if(silent && hasOpenWorkPanel()){
+        console.log('[SCI] Resynchronisation silencieuse reportée : un panneau est ouvert.');
+        return;
+      }
       if(!silent) updateSyncStatus('connecting');
       const body = await api('api/data');
       try{
@@ -1467,6 +1483,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       renderAll();
       renderAttachmentsPanel(leaseId);
       document.getElementById('attRow-'+leaseId).style.display = 'table-row';
+      notify('✓ Pièce jointe ajoutée : ' + file.name);
     }catch(err){
       statusEl.style.color = 'var(--brick-dark)';
       statusEl.textContent = "⚠ Erreur lors de l'envoi : " + (err && err.message || err);
