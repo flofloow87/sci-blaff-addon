@@ -1,0 +1,23 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Démarre le serveur SCI BLAFF (Node.js)
+# ==============================================================================
+
+ADMIN_EMAIL=$(bashio::config 'admin_email')
+ADMIN_PASSWORD=$(bashio::config 'admin_password')
+ADMIN_NAME=$(bashio::config 'admin_name')
+
+if bashio::config.is_empty 'admin_email' || bashio::config.is_empty 'admin_password'; then
+    bashio::log.warning "Options 'admin_email' / 'admin_password' non renseignées."
+    bashio::log.warning "Configure-les dans l'onglet Configuration de l'add-on, puis redémarre."
+fi
+
+export DATA_DIR=/data
+export PORT=3000
+export ADMIN_EMAIL
+export ADMIN_PASSWORD
+export ADMIN_NAME
+
+bashio::log.info "Démarrage du serveur SCI BLAFF sur le port interne 3000…"
+cd /app || bashio::exit.nok "Impossible d'accéder à /app"
+exec node server.js

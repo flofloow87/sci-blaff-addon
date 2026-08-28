@@ -1,0 +1,24 @@
+name: "SCI BLAFF — Registre locatif"
+version: "2.0.0"
+slug: "sci_blaff"
+description: "Registre locatif auto-hébergé pour la SCI BLAFF (baux, quittances, comptabilité, comptes des associés)"
+url: "https://github.com/flo/sci-blaff-addon"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+init: false
+hassio_api: false
+homeassistant_api: false
+ingress: true
+ingress_port: 3000
+panel_icon: mdi:home-city-outline
+panel_title: "SCI BLAFF"
+options:
+  admin_email: ""
+  admin_password: ""
+  admin_name: "Flo"
+schema:
+  admin_email: "email"
+  admin_password: "password"
+  admin_name: "str"
