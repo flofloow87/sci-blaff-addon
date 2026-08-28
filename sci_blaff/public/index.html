@@ -273,6 +273,17 @@
     background:none; border:1px solid var(--white); color:var(--white); font-family:var(--mono); font-size:0.7rem;
     padding:2px 8px; margin-left:10px; cursor:pointer;
   }
+  #toastContainer{
+    position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:200;
+    display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none;
+  }
+  .toast{
+    background:var(--ink); color:var(--white); font-family:var(--serif); font-size:0.88rem;
+    padding:12px 20px; border-left:4px solid var(--gold); max-width:90vw; box-shadow:0 4px 14px rgba(0,0,0,0.25);
+    animation:toast-in .15s ease-out;
+  }
+  .toast.error{ border-left-color:var(--brick-dark); }
+  @keyframes toast-in{ from{ opacity:0; transform:translateY(-8px); } to{ opacity:1; transform:translateY(0); } }
 </style>
 </head>
 <body>
@@ -683,6 +694,20 @@
   </div>
 </div>
 
+<!-- Modal de confirmation générique (remplace window.confirm, bloqué dans le cadre Ingress) -->
+<div class="modal-bg" id="confirmModalBg">
+  <div class="modal" style="max-width:420px;">
+    <p id="confirmModalMessage" style="margin:0 0 20px; line-height:1.5;"></p>
+    <div class="btn-row" style="justify-content:flex-end;">
+      <button class="btn secondary" id="confirmModalCancel">Annuler</button>
+      <button class="btn danger" id="confirmModalOk">Confirmer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Notifications (remplacent window.alert, bloqué dans le cadre Ingress) -->
+<div id="toastContainer"></div>
+
 </div><!-- /#appRoot -->
 
 <script>
@@ -710,6 +735,39 @@
         return { keys, prefix, shared: false };
       }
     };
+  }
+
+  // ---------- NOTIFICATIONS & CONFIRMATIONS ----------
+  // Remplacent window.alert / window.confirm, silencieusement bloqués par certains
+  // navigateurs dans un cadre <iframe> sécurisé — exactement le contexte dans lequel
+  // Home Assistant affiche cet add-on via Ingress.
+  function notify(message, isError){
+    const container = document.getElementById('toastContainer');
+    const el = document.createElement('div');
+    el.className = 'toast' + (isError ? ' error' : '');
+    el.textContent = message;
+    container.appendChild(el);
+    setTimeout(()=>{ el.remove(); }, isError ? 6000 : 3500);
+  }
+
+  function confirmDialog(message){
+    return new Promise((resolve)=>{
+      const bg = document.getElementById('confirmModalBg');
+      document.getElementById('confirmModalMessage').textContent = message;
+      bg.classList.add('open');
+      const okBtn = document.getElementById('confirmModalOk');
+      const cancelBtn = document.getElementById('confirmModalCancel');
+      function cleanup(result){
+        bg.classList.remove('open');
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        resolve(result);
+      }
+      function onOk(){ cleanup(true); }
+      function onCancel(){ cleanup(false); }
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+    });
   }
 
   window.__logoB64 = document.querySelector('header img').src.split(',')[1];
@@ -1096,9 +1154,9 @@
   document.getElementById('aptModalClose').addEventListener('click', ()=> document.getElementById('aptModalBg').classList.remove('open'));
   document.getElementById('aptModalBg').addEventListener('click', (e)=>{ if(e.target.id==='aptModalBg') e.currentTarget.classList.remove('open'); });
 
-  window.__terminateLease = function(leaseId){
+  window.__terminateLease = async function(leaseId){
     const lease = DATA.leases.find(l=>l.id===leaseId);
-    if(lease && confirm(`Terminer le bail de ${lease.tenant} ?`)){
+    if(lease && await confirmDialog(`Terminer le bail de ${lease.tenant} ?`)){
       lease.status = 'terminated';
       logActivity(`Bail terminé : ${lease.tenant} (${(DATA.apartments.find(a=>a.id===lease.aptId)||{}).label||''})`);
       saveData();
@@ -1120,12 +1178,12 @@
     });
   }
 
-  document.getElementById('leaseForm').addEventListener('submit', (e)=>{
+  document.getElementById('leaseForm').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const aptId = document.getElementById('lf-apt').value;
     const existing = activeLeaseForApt(aptId);
     if(existing){
-      if(!confirm(`Ce lot a déjà un locataire actif (${existing.tenant}). Le marquer comme terminé et créer le nouveau bail ?`)) return;
+      if(!(await confirmDialog(`Ce lot a déjà un locataire actif (${existing.tenant}). Le marquer comme terminé et créer le nouveau bail ?`))) return;
       existing.status = 'terminated';
     }
     const lease = {
@@ -1195,8 +1253,8 @@
     </tbody></table>`;
   }
 
-  window.__deleteLease = function(leaseId){
-    if(!confirm('Supprimer ce bail définitivement ? (les quittances associées resteront dans l\'historique)')) return;
+  window.__deleteLease = async function(leaseId){
+    if(!(await confirmDialog('Supprimer ce bail définitivement ? (les quittances associées resteront dans l\'historique)'))) return;
     const lease = DATA.leases.find(l=>l.id===leaseId);
     DATA.leases = DATA.leases.filter(l=>l.id!==leaseId);
     if(lease) logActivity(`Bail supprimé : ${lease.tenant}`);
@@ -1333,7 +1391,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     logActivity(`Loyer révisé (IRL) : ${lease.tenant} — ${fmtEUR(ancienLoyer)} → ${fmtEUR(lease.loyer)}`);
     saveData();
     renderAll();
-    alert('Loyer mis à jour pour ce bail.');
+    notify('Loyer mis à jour pour ce bail.');
   };
 
   // ---------- PIÈCES JOINTES PAR BAIL ----------
@@ -1377,8 +1435,17 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const input = document.getElementById(`attFileInput-${leaseId}`);
     const statusEl = document.getElementById(`attStatus-${leaseId}`);
     const file = input.files[0];
-    if(!file){ alert('Choisis un fichier.'); return; }
-    if(file.size > 20_000_000){ alert('Ce fichier est trop volumineux (limite ~20 Mo). Compresse-le ou réduis sa résolution.'); return; }
+    statusEl.style.color = '';
+    if(!file){
+      statusEl.style.color = 'var(--brick-dark)';
+      statusEl.textContent = '⚠ Choisis d\'abord un fichier avec le bouton ci-dessus.';
+      return;
+    }
+    if(file.size > 20_000_000){
+      statusEl.style.color = 'var(--brick-dark)';
+      statusEl.textContent = '⚠ Fichier trop volumineux (limite ~20 Mo). Compresse-le ou réduis sa résolution.';
+      return;
+    }
     statusEl.textContent = 'Envoi en cours…';
     try{
       const base64 = await new Promise((resolve, reject)=>{
@@ -1401,8 +1468,8 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       renderAttachmentsPanel(leaseId);
       document.getElementById('attRow-'+leaseId).style.display = 'table-row';
     }catch(err){
-      statusEl.textContent = '';
-      alert("Erreur lors de l'envoi : " + (err && err.message || err));
+      statusEl.style.color = 'var(--brick-dark)';
+      statusEl.textContent = "⚠ Erreur lors de l'envoi : " + (err && err.message || err);
     }
   };
 
@@ -1416,12 +1483,12 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       link.click();
       document.body.removeChild(link);
     }catch(err){
-      alert('Erreur lors du téléchargement : ' + (err && err.message || err));
+      notify('Erreur lors du téléchargement : ' + (err && err.message || err), true);
     }
   };
 
   window.__deleteAttachment = async function(leaseId, fileId){
-    if(!confirm('Supprimer cette pièce jointe ?')) return;
+    if(!(await confirmDialog('Supprimer cette pièce jointe ?'))) return;
     const lease = DATA.leases.find(l=>l.id===leaseId);
     if(lease && lease.attachments){
       const att = lease.attachments.find(a=>a.id===fileId);
@@ -1579,7 +1646,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const leaseId = document.getElementById('qf-lease').value;
     const monthVal = document.getElementById('qf-month').value;
     const datePaid = document.getElementById('qf-datepaid').value;
-    if(!leaseId || !monthVal){ alert('Sélectionnez un bail et un mois.'); return; }
+    if(!leaseId || !monthVal){ notify('Sélectionnez un bail et un mois.', true); return; }
     const lease = DATA.leases.find(l=>l.id===leaseId);
     const q = buildQuittance(lease, monthVal, datePaid);
     DATA.quittances.push(q);
@@ -1591,9 +1658,9 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
 
   document.getElementById('genAllBtn').addEventListener('click', ()=>{
     const monthVal = document.getElementById('qf-month').value;
-    if(!monthVal){ alert('Choisissez un mois.'); return; }
+    if(!monthVal){ notify('Choisissez un mois.', true); return; }
     const activeLeases = DATA.leases.filter(l=>l.status==='active');
-    if(activeLeases.length===0){ alert('Aucun bail actif.'); return; }
+    if(activeLeases.length===0){ notify('Aucun bail actif.', true); return; }
     let created = 0;
     activeLeases.forEach(lease=>{
       const already = DATA.quittances.find(q=>q.leaseId===lease.id && q.month===monthVal);
@@ -1604,17 +1671,17 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     logActivity(`${created} quittance(s) générée(s) en masse — ${monthLabelFromInput(monthVal)}`);
     saveData();
     renderQuittances();
-    alert(created + ' quittance(s) générée(s) pour ' + monthLabelFromInput(monthVal) + '.');
+    notify(created + ' quittance(s) générée(s) pour ' + monthLabelFromInput(monthVal) + '.');
   });
 
   document.getElementById('sendAllBtn').addEventListener('click', async ()=>{
     const monthVal = document.getElementById('qf-month').value;
-    if(!monthVal){ alert('Choisissez un mois.'); return; }
+    if(!monthVal){ notify('Choisissez un mois.', true); return; }
     const targets = DATA.quittances.filter(q => q.month === monthVal && !q.emailSentAt);
-    if(targets.length===0){ alert('Aucune quittance à envoyer pour ce mois (déjà toutes envoyées, ou aucune générée).'); return; }
+    if(targets.length===0){ notify('Aucune quittance à envoyer pour ce mois (déjà toutes envoyées, ou aucune générée).', true); return; }
     const withEmail = targets.filter(q=>{ const l = DATA.leases.find(x=>x.id===q.leaseId); return l && l.email; });
-    if(withEmail.length===0){ alert('Aucun des locataires concernés n\'a d\'email enregistré.'); return; }
-    if(!confirm(`Envoyer ${withEmail.length} quittance(s) par email pour ${monthLabelFromInput(monthVal)} ?`)) return;
+    if(withEmail.length===0){ notify('Aucun des locataires concernés n\'a d\'email enregistré.', true); return; }
+    if(!(await confirmDialog(`Envoyer ${withEmail.length} quittance(s) par email pour ${monthLabelFromInput(monthVal)} ?`))) return;
     for(const q of withEmail){
       await window.__sendQuittanceAuto(q.id);
     }
@@ -1659,8 +1726,8 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       renderOverdueList();
     }
   };
-  window.__deleteQuittance = function(id){
-    if(!confirm('Supprimer cette quittance ?')) return;
+  window.__deleteQuittance = async function(id){
+    if(!(await confirmDialog('Supprimer cette quittance ?'))) return;
     const q = DATA.quittances.find(x=>x.id===id);
     DATA.quittances = DATA.quittances.filter(x=>x.id!==id);
     if(q) logActivity(`Quittance supprimée : ${q.tenant} — ${q.monthLabel}`);
@@ -1708,7 +1775,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const q = DATA.quittances.find(x=>x.id===qId);
     if(!q) return;
     const lease = DATA.leases.find(l=>l.id===q.leaseId);
-    if(!lease || !lease.email){ alert('Aucun email enregistré pour ce locataire.'); return; }
+    if(!lease || !lease.email){ notify('Aucun email enregistré pour ce locataire.', true); return; }
     const apt = DATA.apartments.find(a=>a.id===lease.aptId) || {};
     const sci = DATA.sci;
     const subject = `Rappel — loyer impayé — ${q.monthLabel} — ${apt.label||''}`;
@@ -1809,10 +1876,10 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     a[field] = field==='part' ? (parseFloat(value)||0) : value;
     renderAssocies();
   };
-  window.__removeAssocie = function(id){
+  window.__removeAssocie = async function(id){
     const a = DATA.associes.find(x=>x.id===id);
     if(!a) return;
-    if(!confirm(`Retirer ${a.name} de la liste des associés ? (à enregistrer ensuite)`)) return;
+    if(!(await confirmDialog(`Retirer ${a.name} de la liste des associés ? (à enregistrer ensuite)`))) return;
     DATA.associes = DATA.associes.filter(x=>x.id!==id);
     renderAssocies();
   };
@@ -1990,7 +2057,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const q = DATA.quittances.find(x=>x.id===qId);
     if(!q) return;
     const lease = DATA.leases.find(l=>l.id===q.leaseId);
-    if(!lease || !lease.email){ alert('Aucun email enregistré pour ce locataire. Ajoute-le dans le bail.'); return; }
+    if(!lease || !lease.email){ notify('Aucun email enregistré pour ce locataire. Ajoute-le dans le bail.', true); return; }
     const apt = DATA.apartments.find(a=>a.id===lease.aptId) || {};
     const sci = DATA.sci;
 
@@ -2028,7 +2095,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       saveData();
     } catch(err){
       logEmailAttempt({ status:'error', to: lease.email, subject, detail: 'Échec de génération du PDF : '+String(err && err.message || err) });
-      alert("Erreur lors de la génération du PDF : " + (err && err.message || err));
+      notify("Erreur lors de la génération du PDF : " + (err && err.message || err), true);
     }
     renderQuittances();
   };
@@ -2138,7 +2205,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   }
 
   document.getElementById('signOutBtn').addEventListener('click', async ()=>{
-    if(!confirm('Se déconnecter ?')) return;
+    if(!(await confirmDialog('Se déconnecter ?'))) return;
     try{ await api('api/auth/logout', { method: 'POST' }); }catch(e){ /* on se déconnecte localement de toute façon */ }
     clearToken();
     showLoginScreen();
@@ -2181,14 +2248,14 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   }
 
   window.__deleteUser = async function(id, name){
-    if(!confirm(`Supprimer le compte de ${name} ? Cette personne ne pourra plus se connecter.`)) return;
+    if(!(await confirmDialog(`Supprimer le compte de ${name} ? Cette personne ne pourra plus se connecter.`))) return;
     try{
       await api('api/users/' + id, { method: 'DELETE' });
       logActivity(`Compte de connexion supprimé : ${name}`);
       saveData();
       renderUsersList();
     }catch(err){
-      alert('Erreur : ' + err.message);
+      notify('Erreur : ' + err.message, true);
     }
   };
 
@@ -2223,8 +2290,8 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     setTimeout(()=> msg.textContent = '', 2000);
   });
 
-  document.getElementById('resetBailTemplateBtn').addEventListener('click', ()=>{
-    if(!confirm('Revenir au modèle de bail par défaut ? Tes modifications personnalisées seront perdues.')) return;
+  document.getElementById('resetBailTemplateBtn').addEventListener('click', async ()=>{
+    if(!(await confirmDialog('Revenir au modèle de bail par défaut ? Tes modifications personnalisées seront perdues.'))) return;
     DATA.bailTemplate = '';
     logActivity('Modèle de bail réinitialisé');
     saveData();
@@ -2270,14 +2337,14 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       try{
         parsed = JSON.parse(ev.target.result);
       }catch(err){
-        alert('Fichier JSON invalide : ' + err.message);
+        notify('Fichier JSON invalide : ' + err.message, true);
         return;
       }
       if(!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.apartments)){
-        alert('Ce fichier ne ressemble pas à un export valide de cette application.');
+        notify('Ce fichier ne ressemble pas à un export valide de cette application.', true);
         return;
       }
-      if(!confirm('Importer ce fichier remplacera TOUTES les données actuelles (locales et cloud partagé). Continuer ?')) return;
+      if(!(await confirmDialog('Importer ce fichier remplacera TOUTES les données actuelles (locales et cloud partagé). Continuer ?'))) return;
       DATA = Object.assign({
         sci: { name:"", siret:"", adresse:"", gerant:"", immeuble:"" },
         apartments: [], leases: [], quittances: [], emailLog: [], bailTemplate: '', associes: [], activityLog: []
@@ -2285,14 +2352,14 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       logActivity(`Import JSON depuis "${file.name}"`);
       await saveData();
       renderAll();
-      alert('Import terminé.');
+      notify('Import terminé.');
     };
     reader.readAsText(file);
     e.target.value = '';
   });
 
   document.getElementById('resetBtn').addEventListener('click', async ()=>{
-    if(!confirm('Cette action supprimera TOUTES les données (baux, quittances, réglages). Continuer ?')) return;
+    if(!(await confirmDialog('Cette action supprimera TOUTES les données (baux, quittances, réglages). Continuer ?'))) return;
     DATA = {
       sci: { name:"", siret:"", adresse:"", gerant:"", immeuble:"" },
       apartments: [
