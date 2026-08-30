@@ -1,0 +1,39 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Démarre Caddy comme reverse proxy TLS devant le serveur Node.js (port 3000).
+# Le Caddyfile est généré dynamiquement à partir de l'option "domain".
+# Si aucun domaine n'est renseigné, Caddy n'est pas démarré (l'app reste
+# accessible via l'Ingress Home Assistant).
+# ==============================================================================
+
+DOMAIN=$(bashio::config 'domain')
+
+if [ -z "${DOMAIN}" ]; then
+  bashio::log.info "Aucun domaine configuré (option 'domain' vide) : Caddy ne démarre pas."
+  bashio::log.info "L'app reste accessible via l'Ingress Home Assistant."
+  # Service s6 "one-shot" qui ne fait rien indéfiniment sans planter le
+  # superviseur : on dort en boucle plutôt que d'exit (s6 relancerait sinon).
+  exec sleep infinity
+fi
+
+bashio::log.info "Domaine configuré : ${DOMAIN}"
+bashio::log.info "Génération du Caddyfile..."
+
+mkdir -p /data/caddy
+
+cat > /etc/caddy/Caddyfile <<EOF
+{
+    storage file_system {
+        root /data/caddy
+    }
+    email admin@${DOMAIN}
+}
+
+${DOMAIN} {
+    reverse_proxy 127.0.0.1:3000
+    encode gzip
+}
+EOF
+
+bashio::log.info "Démarrage de Caddy (certificat Let's Encrypt automatique via HTTP-01 sur le port 80)..."
+exec /usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

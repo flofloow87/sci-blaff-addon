@@ -1,5 +1,5 @@
 name: "SCI BLAFF — Registre locatif"
-version: "2.1.1"
+version: "3.0.0"
 slug: "sci_blaff"
 description: "Registre locatif auto-hébergé pour la SCI BLAFF (baux, quittances, comptabilité, comptes des associés)"
 url: "https://github.com/flo/sci-blaff-addon"
@@ -14,11 +14,19 @@ ingress: true
 ingress_port: 3000
 panel_icon: mdi:home-city-outline
 panel_title: "SCI BLAFF"
+ports:
+  80/tcp: 80
+  443/tcp: 443
+ports_description:
+  80/tcp: "Caddy — validation Let's Encrypt (HTTP-01)"
+  443/tcp: "Caddy — accès HTTPS direct par domaine"
 options:
   admin_email: ""
   admin_password: ""
   admin_name: "Flo"
+  domain: ""
 schema:
   admin_email: "email"
   admin_password: "password"
   admin_name: "str"
+  domain: "str?"
