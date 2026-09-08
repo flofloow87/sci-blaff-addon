@@ -10,6 +10,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -50,6 +51,13 @@ db.exec(`
     mime_type TEXT NOT NULL,
     base64 TEXT NOT NULL,
     uploaded_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS backup_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_hash TEXT,
+    last_backup_at TEXT,
+    last_status TEXT
   );
 `);
 
@@ -98,6 +106,11 @@ if (!dataRow) {
     .run(JSON.stringify(defaultData), new Date().toISOString(), 'system');
 }
 
+const backupStateRow = db.prepare('SELECT * FROM backup_state WHERE id = 1').get();
+if (!backupStateRow) {
+  db.prepare('INSERT INTO backup_state (id, last_hash, last_backup_at, last_status) VALUES (1, NULL, NULL, NULL)').run();
+}
+
 // ---------------------------------------------------------------------------
 // Sessions (tokens opaques, pas de JWT — plus simple à révoquer)
 // ---------------------------------------------------------------------------
@@ -129,6 +142,18 @@ function requireAuth(req, res, next) {
   const user = getUserFromToken(token);
   if (!user) return res.status(401).json({ error: 'Non authentifié.' });
   req.user = user;
+  next();
+}
+
+// Authentification alternative pour l'export automatisé (sauvegarde quotidienne
+// déclenchée par Home Assistant, sans session utilisateur classique). Accepte
+// une clé fixe définie via l'option "export_api_key" de l'add-on — distincte
+// des mots de passe utilisateurs, à usage unique (uniquement cette route).
+const EXPORT_API_KEY = process.env.EXPORT_API_KEY || '';
+function requireExportKey(req, res, next) {
+  if (!EXPORT_API_KEY) return res.status(503).json({ error: "Export non configuré (option 'export_api_key' vide)." });
+  const provided = req.headers['x-export-key'] || '';
+  if (provided !== EXPORT_API_KEY) return res.status(401).json({ error: 'Clé d\'export invalide.' });
   next();
 }
 
@@ -241,6 +266,195 @@ app.get('/api/attachments/:id', requireAuth, (req, res) => {
 app.delete('/api/attachments/:id', requireAuth, (req, res) => {
   db.prepare('DELETE FROM attachments WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// --- Export complet (sauvegarde quotidienne) ---
+// Combine les deux modes d'authentification : session utilisateur normale
+// (usage manuel depuis l'app) OU clé d'export dédiée (automatisation HA).
+function requireAuthOrExportKey(req, res, next) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const user = getUserFromToken(token);
+  if (user) { req.user = user; return next(); }
+  return requireExportKey(req, res, next);
+}
+
+// Construit l'archive ZIP complète (données + pièces jointes en clair) et la
+// renvoie sous forme de Buffer, avec son empreinte SHA-256 (pour détecter si
+// le contenu a changé depuis la dernière sauvegarde automatique).
+function buildExportZipBuffer() {
+  return new Promise((resolve, reject) => {
+    const dataRow = db.prepare('SELECT json FROM app_data WHERE id = 1').get();
+    const allAttachments = db.prepare('SELECT * FROM attachments').all();
+
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    const chunks = [];
+    archive.on('data', (chunk) => chunks.push(chunk));
+    archive.on('error', reject);
+    archive.on('end', () => {
+      const buffer = Buffer.concat(chunks);
+      const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+      resolve({ buffer, hash });
+    });
+
+    archive.append(JSON.stringify(JSON.parse(dataRow.json), null, 2), { name: 'donnees.json' });
+
+    const manifest = allAttachments.map(a => ({
+      id: a.id, leaseId: a.lease_id, name: a.name, mimeType: a.mime_type, uploadedAt: a.uploaded_at
+    }));
+    archive.append(JSON.stringify(manifest, null, 2), { name: 'pieces-jointes/manifeste.json' });
+
+    for (const att of allAttachments) {
+      const buffer = Buffer.from(att.base64, 'base64');
+      const safeName = `${att.lease_id}__${att.name}`.replace(/[/\\]/g, '_');
+      archive.append(buffer, { name: `pieces-jointes/${safeName}` });
+    }
+
+    archive.finalize();
+  });
+}
+
+app.get('/api/export-full', requireAuthOrExportKey, async (req, res) => {
+  try {
+    const { buffer } = await buildExportZipBuffer();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    res.attachment(`sci-blaff-sauvegarde-${timestamp}.zip`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('[export-full] erreur:', err);
+    res.status(500).json({ error: 'Échec de la génération de l\'export.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Sauvegarde automatique quotidienne vers Google Drive (compte de service).
+// Ne pousse un nouveau fichier que si le contenu a changé depuis la veille
+// (comparaison par empreinte SHA-256), pour éviter d'accumuler des doublons
+// identiques dans le dossier Drive.
+// ---------------------------------------------------------------------------
+const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
+const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '';
+
+let cachedGoogleToken = null; // { token, expiresAt }
+
+function base64url(input) {
+  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function getGoogleAccessToken(serviceAccount) {
+  const now = Math.floor(Date.now() / 1000);
+  if (cachedGoogleToken && cachedGoogleToken.expiresAt > now + 60) {
+    return cachedGoogleToken.token;
+  }
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: serviceAccount.client_email,
+    scope: 'https://www.googleapis.com/auth/drive.file',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now
+  };
+  const unsigned = base64url(JSON.stringify(header)) + '.' + base64url(JSON.stringify(payload));
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(unsigned);
+  const signature = signer.sign(serviceAccount.private_key).toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const jwt = unsigned + '.' + signature;
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=' + encodeURIComponent('urn:ietf:params:oauth:grant-type:jwt-bearer') + '&assertion=' + jwt
+  });
+  const body = await res.json();
+  if (!body.access_token) throw new Error('Échec obtention token Google : ' + JSON.stringify(body));
+  cachedGoogleToken = { token: body.access_token, expiresAt: now + (body.expires_in || 3600) };
+  return body.access_token;
+}
+
+async function uploadToGoogleDrive(buffer, filename) {
+  const serviceAccount = JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON);
+  const accessToken = await getGoogleAccessToken(serviceAccount);
+
+  const boundary = 'sciblaff' + crypto.randomBytes(8).toString('hex');
+  const metadata = { name: filename, parents: GOOGLE_DRIVE_FOLDER_ID ? [GOOGLE_DRIVE_FOLDER_ID] : undefined };
+
+  const bodyParts = [
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,
+    `--${boundary}\r\nContent-Type: application/zip\r\n\r\n`
+  ];
+  const multipartBody = Buffer.concat([
+    Buffer.from(bodyParts[0], 'utf8'),
+    Buffer.from(bodyParts[1], 'utf8'),
+    buffer,
+    Buffer.from(`\r\n--${boundary}--`, 'utf8')
+  ]);
+
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': `multipart/related; boundary=${boundary}`
+    },
+    body: multipartBody
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error('Échec upload Google Drive : ' + JSON.stringify(body));
+  return body; // { id, ... }
+}
+
+async function runDailyBackupIfChanged() {
+  if (!GOOGLE_SERVICE_ACCOUNT_JSON) {
+    console.log('[backup] Sauvegarde Google Drive non configurée, ignorée.');
+    return;
+  }
+  try {
+    const { buffer, hash } = await buildExportZipBuffer();
+    const state = db.prepare('SELECT * FROM backup_state WHERE id = 1').get();
+    if (state && state.last_hash === hash) {
+      console.log('[backup] Aucune modification depuis la dernière sauvegarde, envoi ignoré.');
+      db.prepare('UPDATE backup_state SET last_status = ? WHERE id = 1').run('inchangé, non envoyé');
+      return;
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    await uploadToGoogleDrive(buffer, `sci-blaff-sauvegarde-${timestamp}.zip`);
+    db.prepare('UPDATE backup_state SET last_hash = ?, last_backup_at = ?, last_status = ? WHERE id = 1')
+      .run(hash, new Date().toISOString(), 'envoyé avec succès');
+    console.log('[backup] Sauvegarde envoyée vers Google Drive avec succès.');
+  } catch (err) {
+    console.error('[backup] Échec de la sauvegarde automatique :', err.message);
+    db.prepare('UPDATE backup_state SET last_status = ? WHERE id = 1').run('erreur : ' + err.message);
+  }
+}
+
+// Vérifie chaque minute s'il est l'heure de la sauvegarde quotidienne (03:00),
+// avec un verrou pour ne se déclencher qu'une seule fois par jour.
+const BACKUP_HOUR = 3;
+let lastBackupTriggerDate = null;
+setInterval(() => {
+  const now = new Date();
+  const todayKey = now.toISOString().slice(0, 10);
+  if (now.getHours() === BACKUP_HOUR && lastBackupTriggerDate !== todayKey) {
+    lastBackupTriggerDate = todayKey;
+    runDailyBackupIfChanged();
+  }
+}, 60 * 1000);
+
+// Endpoint pour déclencher une sauvegarde manuellement (test / bouton dans
+// l'interface) et pour consulter l'état de la dernière sauvegarde.
+app.post('/api/backup/run-now', requireAuth, async (req, res) => {
+  await runDailyBackupIfChanged();
+  const state = db.prepare('SELECT * FROM backup_state WHERE id = 1').get();
+  res.json({ ok: true, state });
+});
+
+app.get('/api/backup/status', requireAuth, (req, res) => {
+  const state = db.prepare('SELECT * FROM backup_state WHERE id = 1').get();
+  res.json({
+    configured: !!GOOGLE_SERVICE_ACCOUNT_JSON,
+    lastBackupAt: state ? state.last_backup_at : null,
+    lastStatus: state ? state.last_status : null
+  });
 });
 
 // --- Fichiers statiques (le front-end) ---
