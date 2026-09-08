@@ -346,6 +346,16 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '';
 const GOOGLE_REDIRECT_URI_PATH = '/api/google-oauth/callback';
+const APP_DOMAIN = process.env.DOMAIN || '';
+
+// Construit toujours l'URI de redirection en HTTPS avec le domaine configuré
+// (pas via req.protocol/req.get('host') : derrière Caddy en reverse proxy,
+// Express voit la requête entrante en http même si le client est en https,
+// ce qui casse la correspondance exacte exigée par Google OAuth).
+function getGoogleRedirectUri() {
+  if (!APP_DOMAIN) throw new Error("Option 'domain' non configurée : indispensable pour Google OAuth (Google exige une URL de redirection fixe).");
+  return `https://${APP_DOMAIN}${GOOGLE_REDIRECT_URI_PATH}`;
+}
 
 function getStoredRefreshToken() {
   const row = db.prepare('SELECT google_refresh_token FROM backup_state WHERE id = 1').get();
@@ -375,7 +385,7 @@ app.get('/api/google-oauth/start', requireAuthViaHeaderOrQuery, (req, res) => {
   if (!GOOGLE_CLIENT_ID) {
     return res.status(503).send("Google OAuth non configuré (renseigne d'abord google_client_id / google_client_secret dans les options de l'add-on).");
   }
-  const redirectUri = `${req.protocol}://${req.get('host')}${GOOGLE_REDIRECT_URI_PATH}`;
+  const redirectUri = getGoogleRedirectUri();
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: redirectUri,
@@ -395,7 +405,7 @@ app.get(GOOGLE_REDIRECT_URI_PATH, async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('Autorisation refusée ou paramètre "code" manquant.');
   try {
-    const redirectUri = `${req.protocol}://${req.get('host')}${GOOGLE_REDIRECT_URI_PATH}`;
+    const redirectUri = getGoogleRedirectUri();
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
