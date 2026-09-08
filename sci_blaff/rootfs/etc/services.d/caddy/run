@@ -20,6 +20,7 @@ bashio::log.info "Domaine configuré : ${DOMAIN}"
 bashio::log.info "Génération du Caddyfile..."
 
 mkdir -p /data/caddy
+mkdir -p /etc/caddy
 
 cat > /etc/caddy/Caddyfile <<EOF
 {
