@@ -356,7 +356,22 @@ function getStoredRefreshToken() {
 // consentement Google. access_type=offline + prompt=consent garantissent la
 // délivrance d'un refresh_token même si l'utilisateur avait déjà autorisé
 // l'app par le passé.
-app.get('/api/google-oauth/start', requireAuth, (req, res) => {
+// Variante de requireAuth acceptant le token via un paramètre d'URL, en plus
+// du header Authorization standard. Nécessaire uniquement pour la route
+// /api/google-oauth/start, qui doit pouvoir être ouverte par une vraie
+// navigation de page (clic sur un lien) — un simple lien HTML ne peut pas
+// envoyer de header Authorization personnalisé.
+function requireAuthViaHeaderOrQuery(req, res, next) {
+  const authHeader = req.headers.authorization || '';
+  const headerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const token = headerToken || req.query.token || null;
+  const user = getUserFromToken(token);
+  if (!user) return res.status(401).send('Non authentifié. Reviens dans l\'application et réessaie depuis le bouton prévu.');
+  req.user = user;
+  next();
+}
+
+app.get('/api/google-oauth/start', requireAuthViaHeaderOrQuery, (req, res) => {
   if (!GOOGLE_CLIENT_ID) {
     return res.status(503).send("Google OAuth non configuré (renseigne d'abord google_client_id / google_client_secret dans les options de l'add-on).");
   }
