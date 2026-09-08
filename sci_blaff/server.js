@@ -57,9 +57,18 @@ db.exec(`
     id INTEGER PRIMARY KEY CHECK (id = 1),
     last_hash TEXT,
     last_backup_at TEXT,
-    last_status TEXT
+    last_status TEXT,
+    google_refresh_token TEXT
   );
 `);
+
+// Migration douce : ajoute la colonne si la table existait déjà sans elle
+// (installations antérieures à l'introduction du flux OAuth).
+try {
+  db.exec('ALTER TABLE backup_state ADD COLUMN google_refresh_token TEXT');
+} catch (e) {
+  // Colonne déjà présente : rien à faire.
+}
 
 // ---------------------------------------------------------------------------
 // Bootstrap : premier compte admin créé depuis les variables d'environnement,
@@ -327,54 +336,107 @@ app.get('/api/export-full', requireAuthOrExportKey, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Sauvegarde automatique quotidienne vers Google Drive (compte de service).
-// Ne pousse un nouveau fichier que si le contenu a changé depuis la veille
-// (comparaison par empreinte SHA-256), pour éviter d'accumuler des doublons
-// identiques dans le dossier Drive.
+// Sauvegarde automatique quotidienne vers Google Drive (OAuth avec le compte
+// personnel de l'utilisateur — les comptes de service n'ont pas de quota de
+// stockage propre sur un compte Google grand public, seulement sur Workspace
+// avec des Drives partagés). Ne pousse un nouveau fichier que si le contenu a
+// changé depuis la veille (comparaison par empreinte SHA-256).
 // ---------------------------------------------------------------------------
-const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '';
+const GOOGLE_REDIRECT_URI_PATH = '/api/google-oauth/callback';
+
+function getStoredRefreshToken() {
+  const row = db.prepare('SELECT google_refresh_token FROM backup_state WHERE id = 1').get();
+  return row ? row.google_refresh_token : null;
+}
+
+// Démarre le flux d'autorisation : redirige l'utilisateur vers l'écran de
+// consentement Google. access_type=offline + prompt=consent garantissent la
+// délivrance d'un refresh_token même si l'utilisateur avait déjà autorisé
+// l'app par le passé.
+app.get('/api/google-oauth/start', requireAuth, (req, res) => {
+  if (!GOOGLE_CLIENT_ID) {
+    return res.status(503).send("Google OAuth non configuré (renseigne d'abord google_client_id / google_client_secret dans les options de l'add-on).");
+  }
+  const redirectUri = `${req.protocol}://${req.get('host')}${GOOGLE_REDIRECT_URI_PATH}`;
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'https://www.googleapis.com/auth/drive.file',
+    access_type: 'offline',
+    prompt: 'consent'
+  });
+  res.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + params.toString());
+});
+
+// Callback OAuth : échange le code contre un refresh_token et le stocke.
+// Pas de requireAuth ici (Google redirige l'utilisateur, pas un fetch API
+// authentifié), mais l'échange lui-même exige le client_secret, donc un
+// tiers ne peut pas exploiter cette route sans le connaître.
+app.get(GOOGLE_REDIRECT_URI_PATH, async (req, res) => {
+  const code = req.query.code;
+  if (!code) return res.status(400).send('Autorisation refusée ou paramètre "code" manquant.');
+  try {
+    const redirectUri = `${req.protocol}://${req.get('host')}${GOOGLE_REDIRECT_URI_PATH}`;
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      }).toString()
+    });
+    const tokenBody = await tokenRes.json();
+    if (!tokenBody.refresh_token) {
+      // Google ne renvoie un refresh_token que lors du tout premier consentement
+      // (ou avec prompt=consent, ce qu'on force déjà) — si absent malgré tout,
+      // le message d'erreur explique la marche à suivre.
+      return res.status(400).send(
+        'Aucun refresh_token reçu de Google : ' + JSON.stringify(tokenBody) +
+        '<br><br>Réessaie en révoquant l\'accès existant sur <a href="https://myaccount.google.com/permissions" target="_blank">myaccount.google.com/permissions</a>, puis relance l\'autorisation.'
+      );
+    }
+    db.prepare('UPDATE backup_state SET google_refresh_token = ? WHERE id = 1').run(tokenBody.refresh_token);
+    res.send('<h2>✓ Connexion à Google Drive réussie.</h2><p>Tu peux fermer cette page et retourner dans l\'application.</p>');
+  } catch (err) {
+    res.status(500).send('Erreur lors de l\'échange du code OAuth : ' + err.message);
+  }
+});
 
 let cachedGoogleToken = null; // { token, expiresAt }
 
-function base64url(input) {
-  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-async function getGoogleAccessToken(serviceAccount) {
+async function getGoogleAccessToken() {
   const now = Math.floor(Date.now() / 1000);
   if (cachedGoogleToken && cachedGoogleToken.expiresAt > now + 60) {
     return cachedGoogleToken.token;
   }
-  const header = { alg: 'RS256', typ: 'JWT' };
-  const payload = {
-    iss: serviceAccount.client_email,
-    scope: 'https://www.googleapis.com/auth/drive.file',
-    aud: 'https://oauth2.googleapis.com/token',
-    exp: now + 3600,
-    iat: now
-  };
-  const unsigned = base64url(JSON.stringify(header)) + '.' + base64url(JSON.stringify(payload));
-  const signer = crypto.createSign('RSA-SHA256');
-  signer.update(unsigned);
-  const signature = signer.sign(serviceAccount.private_key).toString('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  const jwt = unsigned + '.' + signature;
+  const refreshToken = getStoredRefreshToken();
+  if (!refreshToken) throw new Error("Google Drive non autorisé (aucun refresh_token stocké — utilise le lien d'autorisation).");
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'grant_type=' + encodeURIComponent('urn:ietf:params:oauth:grant-type:jwt-bearer') + '&assertion=' + jwt
+    body: new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token'
+    }).toString()
   });
   const body = await res.json();
-  if (!body.access_token) throw new Error('Échec obtention token Google : ' + JSON.stringify(body));
+  if (!body.access_token) throw new Error('Échec du renouvellement du token Google : ' + JSON.stringify(body));
   cachedGoogleToken = { token: body.access_token, expiresAt: now + (body.expires_in || 3600) };
   return body.access_token;
 }
 
 async function uploadToGoogleDrive(buffer, filename) {
-  const serviceAccount = JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON);
-  const accessToken = await getGoogleAccessToken(serviceAccount);
+  const accessToken = await getGoogleAccessToken();
 
   const boundary = 'sciblaff' + crypto.randomBytes(8).toString('hex');
   const metadata = { name: filename, parents: GOOGLE_DRIVE_FOLDER_ID ? [GOOGLE_DRIVE_FOLDER_ID] : undefined };
@@ -404,8 +466,8 @@ async function uploadToGoogleDrive(buffer, filename) {
 }
 
 async function runDailyBackupIfChanged() {
-  if (!GOOGLE_SERVICE_ACCOUNT_JSON) {
-    console.log('[backup] Sauvegarde Google Drive non configurée, ignorée.');
+  if (!getStoredRefreshToken()) {
+    console.log('[backup] Google Drive non autorisé, sauvegarde ignorée.');
     return;
   }
   try {
@@ -451,7 +513,8 @@ app.post('/api/backup/run-now', requireAuth, async (req, res) => {
 app.get('/api/backup/status', requireAuth, (req, res) => {
   const state = db.prepare('SELECT * FROM backup_state WHERE id = 1').get();
   res.json({
-    configured: !!GOOGLE_SERVICE_ACCOUNT_JSON,
+    oauthClientConfigured: !!GOOGLE_CLIENT_ID,
+    googleDriveConnected: !!getStoredRefreshToken(),
     lastBackupAt: state ? state.last_backup_at : null,
     lastStatus: state ? state.last_status : null
   });
