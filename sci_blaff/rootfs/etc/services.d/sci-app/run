@@ -6,6 +6,7 @@
 ADMIN_EMAIL=$(bashio::config 'admin_email')
 ADMIN_PASSWORD=$(bashio::config 'admin_password')
 ADMIN_NAME=$(bashio::config 'admin_name')
+DOMAIN=$(bashio::config 'domain')
 EXPORT_API_KEY=$(bashio::config 'export_api_key')
 GOOGLE_CLIENT_ID=$(bashio::config 'google_client_id')
 GOOGLE_CLIENT_SECRET=$(bashio::config 'google_client_secret')
@@ -21,6 +22,7 @@ export PORT=3000
 export ADMIN_EMAIL
 export ADMIN_PASSWORD
 export ADMIN_NAME
+export DOMAIN
 export EXPORT_API_KEY
 export GOOGLE_CLIENT_ID
 export GOOGLE_CLIENT_SECRET
