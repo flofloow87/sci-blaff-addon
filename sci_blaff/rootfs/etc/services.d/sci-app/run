@@ -6,6 +6,9 @@
 ADMIN_EMAIL=$(bashio::config 'admin_email')
 ADMIN_PASSWORD=$(bashio::config 'admin_password')
 ADMIN_NAME=$(bashio::config 'admin_name')
+EXPORT_API_KEY=$(bashio::config 'export_api_key')
+GOOGLE_SERVICE_ACCOUNT_JSON=$(bashio::config 'google_service_account_json')
+GOOGLE_DRIVE_FOLDER_ID=$(bashio::config 'google_drive_folder_id')
 
 if bashio::config.is_empty 'admin_email' || bashio::config.is_empty 'admin_password'; then
     bashio::log.warning "Options 'admin_email' / 'admin_password' non renseignées."
@@ -17,6 +20,9 @@ export PORT=3000
 export ADMIN_EMAIL
 export ADMIN_PASSWORD
 export ADMIN_NAME
+export EXPORT_API_KEY
+export GOOGLE_SERVICE_ACCOUNT_JSON
+export GOOGLE_DRIVE_FOLDER_ID
 
 bashio::log.info "Démarrage du serveur SCI BLAFF sur le port interne 3000…"
 cd /app || bashio::exit.nok "Impossible d'accéder à /app"
