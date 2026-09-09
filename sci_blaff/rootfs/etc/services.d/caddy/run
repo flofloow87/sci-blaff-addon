@@ -31,10 +31,15 @@ cat > /etc/caddy/Caddyfile <<EOF
 }
 
 ${DOMAIN} {
+    tls {
+        issuer acme {
+            disable_http_challenge
+        }
+    }
     reverse_proxy 127.0.0.1:3000
     encode gzip
 }
 EOF
 
-bashio::log.info "Démarrage de Caddy (certificat Let's Encrypt automatique via HTTP-01 sur le port 80)..."
+bashio::log.info "Démarrage de Caddy (certificat automatique via TLS-ALPN-01 sur le port 443 uniquement — le port 80 n'est pas requis)..."
 exec /usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
