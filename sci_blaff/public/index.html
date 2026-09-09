@@ -682,6 +682,17 @@
       </div>
       <p class="helper" style="margin-top:8px;">L'import remplace entièrement les données actuelles par celles du fichier — utile comme filet de sécurité si besoin de restaurer une sauvegarde.</p>
     </div>
+
+    <div class="panel">
+      <div class="panel-title">Sauvegarde complète (données + pièces jointes)</div>
+      <p class="helper" id="backupStatusMsg">Chargement du statut…</p>
+      <div class="btn-row">
+        <button class="btn secondary" id="backupDownloadBtn">Télécharger une sauvegarde (.zip)</button>
+        <button class="btn secondary" id="backupDriveNowBtn">Sauvegarder maintenant sur Google Drive</button>
+        <span class="helper" id="backupActionMsg" style="align-self:center;"></span>
+      </div>
+      <p class="helper" style="margin-top:8px;">Une sauvegarde automatique s'envoie aussi chaque nuit vers Google Drive, uniquement si des données ont changé depuis la veille.</p>
+    </div>
   </section>
 
 </main>
@@ -2399,6 +2410,82 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     };
     await saveData();
     renderAll();
+  });
+
+  // --- Sauvegarde complète (téléchargement direct + envoi manuel vers Drive) ---
+  async function refreshBackupStatus(){
+    const el = document.getElementById('backupStatusMsg');
+    if(!el) return;
+    try{
+      const status = await api('api/backup/status');
+      if(!status.oauthClientConfigured){
+        el.textContent = "Sauvegarde Google Drive non configurée (option manquante côté add-on).";
+      } else if(!status.googleDriveConnected){
+        el.textContent = "Google Drive non autorisé pour l'instant.";
+      } else if(status.lastBackupAt){
+        const d = new Date(status.lastBackupAt);
+        el.textContent = `Dernière sauvegarde envoyée sur Drive : ${d.toLocaleString('fr-FR')} (${status.lastStatus || ''})`;
+      } else {
+        el.textContent = "Aucune sauvegarde envoyée sur Drive pour l'instant.";
+      }
+    }catch(err){
+      el.textContent = "Impossible de récupérer le statut de sauvegarde.";
+    }
+  }
+  refreshBackupStatus();
+
+  document.getElementById('backupDownloadBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('backupDownloadBtn');
+    const msg = document.getElementById('backupActionMsg');
+    btn.disabled = true;
+    msg.textContent = 'Préparation du fichier…';
+    try{
+      const token = localStorage.getItem('sci-auth-token');
+      const res = await fetch('api/export-full', { headers: { 'Authorization': 'Bearer ' + token } });
+      if(!res.ok) throw new Error('Le serveur a renvoyé une erreur (' + res.status + ').');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      a.href = url;
+      a.download = match ? match[1] : 'sci-blaff-sauvegarde.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+      msg.textContent = '✓ Téléchargement lancé.';
+      logActivity('Sauvegarde complète téléchargée');
+    }catch(err){
+      msg.textContent = '';
+      notify('⚠ Échec du téléchargement : ' + err.message, true);
+    }finally{
+      btn.disabled = false;
+      setTimeout(()=> msg.textContent = '', 4000);
+    }
+  });
+
+  document.getElementById('backupDriveNowBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('backupDriveNowBtn');
+    const msg = document.getElementById('backupActionMsg');
+    btn.disabled = true;
+    msg.textContent = 'Envoi en cours…';
+    try{
+      const result = await api('api/backup/run-now', { method: 'POST' });
+      const status = result.state && result.state.last_status;
+      if(status === 'envoyé avec succès'){
+        notify('✓ Sauvegarde envoyée sur Google Drive.');
+      } else if(status === 'inchangé, non envoyé'){
+        notify('Aucune modification depuis la dernière sauvegarde : rien envoyé.');
+      } else {
+        notify('⚠ ' + (status || 'Échec de la sauvegarde.'), true);
+      }
+      msg.textContent = '';
+      refreshBackupStatus();
+    }catch(err){
+      msg.textContent = '';
+      notify('⚠ Échec de la sauvegarde : ' + err.message, true);
+    }finally{
+      btn.disabled = false;
+    }
   });
 
   function renderModeNotice(){
