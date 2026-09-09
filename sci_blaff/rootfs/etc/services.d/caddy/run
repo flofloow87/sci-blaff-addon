@@ -33,6 +33,11 @@ cat > /etc/caddy/Caddyfile <<EOF
 ${DOMAIN} {
     tls {
         issuer acme {
+            dir https://acme-v02.api.letsencrypt.org/directory
+            disable_http_challenge
+        }
+        issuer acme {
+            dir https://acme.zerossl.com/v2/DV90
             disable_http_challenge
         }
     }
