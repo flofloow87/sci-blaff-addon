@@ -1643,11 +1643,16 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   // encodé en base64, prêt à être uploadé comme pièce jointe.
   async function generateBailPdfBase64(lease){
     const container = document.createElement('div');
+    // Positionné dans la zone visible (pas hors-écran) : html2canvas ne peut
+    // capturer correctement que ce que le navigateur "peint" réellement, et
+    // les éléments hors du viewport ne sont pas peints. Un léger flash bref
+    // à l'écran est un compromis acceptable pour un rendu fiable.
     container.style.position = 'fixed';
-    container.style.left = '-9999px';
+    container.style.left = '0';
     container.style.top = '0';
     container.style.width = '760px';
     container.style.background = '#ffffff';
+    container.style.zIndex = '999999';
     container.innerHTML = buildBailInnerHtml(lease);
     document.body.appendChild(container);
     try{
