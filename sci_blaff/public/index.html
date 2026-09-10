@@ -15,6 +15,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
   :root{
     --ink:#152845;
@@ -1243,6 +1244,7 @@
     DATA.leases.push(lease);
     logActivity(`Bail créé : ${lease.tenant} (${(DATA.apartments.find(a=>a.id===lease.aptId)||{}).label||''})`);
     saveData();
+    syncBailPdfAttachment(lease);
     e.target.reset();
     document.getElementById('lf-jourpaiement').value = 1;
     document.getElementById('lf-charges').value = 0;
@@ -1269,6 +1271,7 @@
           <td><span class="tag-pill ${l.status==='active'?'paid':'due'}">${l.status==='active'?'Actif':'Terminé'}</span></td>
           <td>
             <button class="btn small" onclick="window.__viewBailDoc('${l.id}')">Voir le bail</button>
+            <button class="btn secondary small" onclick="window.__regenBailPdf('${l.id}')">Régénérer le PDF</button>
             <button class="btn secondary small" onclick="window.__toggleIrlCalc('${l.id}')">Réviser (IRL)</button>
             <button class="btn secondary small" onclick="window.__toggleAttachments('${l.id}')">Pièces jointes${l.attachments && l.attachments.length ? ' ('+l.attachments.length+')' : ''}</button>
             <button class="btn secondary small" onclick="window.__deleteLease('${l.id}')">Supprimer</button>
@@ -1530,9 +1533,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     try{ await api('api/attachments/' + fileId, { method: 'DELETE' }); }catch(e){ /* pièce déjà absente, sans conséquence */ }
   };
 
-  window.__viewBailDoc = function(leaseId){
-    const lease = DATA.leases.find(l=>l.id===leaseId);
-    if(!lease) return;
+  function buildBailInnerHtml(lease){
     const apt = DATA.apartments.find(a=>a.id===lease.aptId) || {};
     const sci = DATA.sci;
     const isNu = lease.type === 'nu';
@@ -1568,7 +1569,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
 
     const articlesHtml = fillBailTemplate(DATA.bailTemplate || DEFAULT_BAIL_ARTICLES, tokens);
 
-    const html = `
+    return `
       <div class="quittance-preview" id="bailPrintTarget" style="max-width:760px;">
         <div class="q-head">
           <div>
@@ -1614,6 +1615,22 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         </div>
         ${lease.garant ? `<div class="q-sign"><div><div class="line">La Caution (${lease.garant})</div></div><div></div></div>` : ''}
       </div>
+    `;
+  }
+
+  window.__regenBailPdf = async function(leaseId){
+    const lease = DATA.leases.find(l=>l.id===leaseId);
+    if(!lease) return;
+    notify('Génération du PDF en cours…');
+    await syncBailPdfAttachment(lease);
+    renderAll();
+    notify('✓ PDF du bail mis à jour dans les pièces jointes.');
+  };
+
+  window.__viewBailDoc = function(leaseId){
+    const lease = DATA.leases.find(l=>l.id===leaseId);
+    if(!lease) return;
+    const html = buildBailInnerHtml(lease) + `
       <div class="btn-row no-print" style="justify-content:center; margin-top:16px;">
         <button class="btn" onclick="window.__printIsolated('leaseDocWrap')">Imprimer / Exporter en PDF</button>
       </div>
@@ -1621,6 +1638,58 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     document.getElementById('leaseDocWrap').innerHTML = html;
     document.getElementById('leaseDocWrap').scrollIntoView({behavior:'smooth', block:'start'});
   };
+
+  // Génère le PDF du bail (même mise en page que "Voir le bail") et le renvoie
+  // encodé en base64, prêt à être uploadé comme pièce jointe.
+  async function generateBailPdfBase64(lease){
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    container.style.width = '760px';
+    container.style.background = '#ffffff';
+    container.innerHTML = buildBailInnerHtml(lease);
+    document.body.appendChild(container);
+    try{
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      await doc.html(container, {
+        x: 20, y: 20,
+        width: 555,
+        windowWidth: 760,
+        html2canvas: { scale: 0.73 }
+      });
+      return doc.output('datauristring').split(',')[1];
+    } finally {
+      document.body.removeChild(container);
+    }
+  }
+
+  // Génère le PDF du bail et le dépose (ou remplace) dans ses pièces jointes,
+  // sous un nom fixe et reconnaissable, pour qu'il apparaisse systématiquement
+  // dans les sauvegardes (export ZIP / Google Drive).
+  async function syncBailPdfAttachment(lease){
+    const AUTO_BAIL_NAME = 'Contrat de bail (généré automatiquement).pdf';
+    try{
+      const base64 = await generateBailPdfBase64(lease);
+      const previous = (lease.attachments||[]).filter(a => a.name === AUTO_BAIL_NAME);
+      for (const att of previous) {
+        try { await api('api/attachments/'+att.id, { method:'DELETE' }); } catch(e) {}
+      }
+      lease.attachments = (lease.attachments||[]).filter(a => a.name !== AUTO_BAIL_NAME);
+
+      const result = await api('api/attachments', {
+        method: 'POST',
+        body: JSON.stringify({ leaseId: lease.id, name: AUTO_BAIL_NAME, mimeType: 'application/pdf', base64 })
+      });
+      lease.attachments = lease.attachments || [];
+      lease.attachments.push({ id: result.id, name: result.name, mimeType: result.mimeType, uploadedAt: result.uploadedAt });
+      await saveData();
+    } catch(err){
+      console.error('Échec génération PDF du bail :', err);
+      notify('⚠ Le PDF du bail n\'a pas pu être généré automatiquement.', true);
+    }
+  }
 
   // ---------- QUITTANCES ----------
   function populateLeaseSelect(){
