@@ -1,5 +1,5 @@
 name: "SCI BLAFF — Registre locatif"
-version: "3.5.1"
+version: "3.6.0"
 slug: "sci_blaff"
 description: "Registre locatif auto-hébergé pour la SCI BLAFF (baux, quittances, comptabilité, comptes des associés)"
 url: "https://github.com/flo/sci-blaff-addon"
