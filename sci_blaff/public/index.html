@@ -15,6 +15,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- JSZip embarqué localement (pas de dépendance externe pour la restauration de sauvegarde) -->
+<script src="vendor/jszip.min.js"></script>
 <style>
   :root{
     --ink:#152845;
@@ -248,6 +250,43 @@
   .modal-close{ float:right; background:none; border:none; font-size:1.3rem; cursor:pointer; color:var(--ink); line-height:1;}
 
   select[multiple]{ min-height:70px; }
+
+  /* ==== Comptabilité ==== */
+  .compta-subnav{ display:flex; flex-wrap:wrap; gap:0; border-bottom:1px solid var(--line); margin-bottom:20px; }
+  .compta-subnav button{
+    font-family:var(--display); font-size:0.72rem; letter-spacing:0.4px; text-transform:uppercase; font-weight:600;
+    background:none; border:none; padding:10px 14px; cursor:pointer; color:var(--ink); opacity:0.55; border-bottom:3px solid transparent;
+  }
+  .compta-subnav button:hover{ opacity:0.9; }
+  .compta-subnav button.active{ opacity:1; border-bottom-color:var(--brick); font-weight:700; }
+  .compta-sub{ display:none; }
+  .compta-sub.active{ display:block; }
+  .kpi-card{ background:var(--white); border:1px solid var(--line); border-left:5px solid var(--sage); padding:16px; }
+  .kpi-card .kpi-label{ font-family:var(--mono); font-size:0.66rem; text-transform:uppercase; letter-spacing:1px; color:var(--sage); }
+  .kpi-card .kpi-value{ font-family:var(--display); font-size:1.45rem; font-weight:700; margin-top:6px; }
+  .kpi-card .kpi-sub{ font-family:var(--mono); font-size:0.68rem; color:var(--sage); margin-top:4px; }
+  .kpi-card.positive{ border-left-color:var(--brick); }
+  .kpi-card.negative{ border-left-color:var(--brick-dark); }
+  .badge{ font-family:var(--mono); font-size:0.63rem; padding:2px 8px; text-transform:uppercase; letter-spacing:0.5px; display:inline-block; }
+  .badge.cloture{ background:var(--ink); color:var(--white); }
+  .badge.ouvert{ background:var(--sage); color:var(--white); }
+  .compta-note{
+    font-family:var(--mono); font-size:0.72rem; color:var(--sage); background:var(--paper2); border-left:3px solid var(--gold);
+    padding:10px 12px; margin:10px 0; line-height:1.6;
+  }
+  table.compact th, table.compact td{ padding:6px 8px; font-size:0.82rem; }
+  .num-col{ text-align:right; font-family:var(--mono); white-space:nowrap; }
+  .bilan-cols{ display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width:720px){ .bilan-cols{ grid-template-columns:1fr; } }
+  .bilan-total-row td{ font-weight:bold; border-top:2px solid var(--ink); border-bottom:none; }
+  .ecriture-block{ border:1px solid var(--line); margin-bottom:10px; background:var(--white); }
+  .ecriture-head{
+    display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--paper2);
+    font-family:var(--mono); font-size:0.75rem; cursor:default; gap:10px; flex-wrap:wrap;
+  }
+  .ecriture-lignes td{ font-size:0.82rem; }
+  .free-entry-row{ display:grid; grid-template-columns:2fr 2fr 1fr 1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
+  @media (max-width:720px){ .free-entry-row{ grid-template-columns:1fr 1fr; } }
 
   .btn[disabled]{ opacity:0.5; cursor:wait; }
   .log-entry{
@@ -538,37 +577,171 @@
   <!-- ACCOUNTING -->
   <section class="view" id="view-accounting">
     <h2 class="section-title"><span class="section-num">05</span> Comptabilité</h2>
-    <p class="section-sub">Récapitulatif annuel et répartition entre associés</p>
+    <p class="section-sub">Comptabilité d'engagement pour SCI à l'IS — écritures, immobilisations, bilan, résultat, IS et export FEC</p>
 
-    <div class="panel">
-      <div class="panel-title">Associés de la SCI</div>
-      <p class="helper" style="margin-bottom:12px;">Utilisé pour répartir les loyers perçus et pour identifier qui modifie les données (journal d'activité).</p>
-      <div id="associesList"></div>
-      <div class="btn-row">
-        <button class="btn secondary small" id="addAssocieBtn">+ Ajouter un associé</button>
-        <button class="btn" id="saveAssociesBtn">Enregistrer les associés</button>
-        <span class="helper" id="associesSaved" style="align-self:center;"></span>
-      </div>
+    <div class="compta-subnav" id="comptaSubnav">
+      <button data-sub="board" class="active">Tableau de bord</button>
+      <button data-sub="ecritures">Écritures</button>
+      <button data-sub="immos">Immobilisations</button>
+      <button data-sub="factures">Factures</button>
+      <button data-sub="assoc">Associés &amp; comptes courants</button>
+      <button data-sub="bilan">Bilan</button>
+      <button data-sub="resultat">Résultat</button>
+      <button data-sub="is">IS &amp; échéances</button>
+      <button data-sub="export">Export &amp; FEC</button>
     </div>
 
-    <div class="panel">
-      <div class="panel-title">Récapitulatif annuel des loyers perçus</div>
+    <!-- TABLEAU DE BORD -->
+    <div class="compta-sub active" id="compta-board">
       <div class="field-row">
-        <div>
-          <label>Année</label>
-          <select id="acc-year"></select>
+        <div><label>Exercice</label><select id="compta-year"></select></div>
+      </div>
+      <div class="grid4" id="comptaKpis"></div>
+      <div class="panel">
+        <div class="panel-title">Compte de résultat — synthèse de l'exercice</div>
+        <div id="comptaBoardResultat"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Récapitulatif annuel des loyers perçus</div>
+        <div class="field-row">
+          <div><label>Année</label><select id="acc-year"></select></div>
+        </div>
+        <div id="accountingSummary"></div>
+        <div class="btn-row">
+          <button class="btn secondary" id="exportAccountingCsvBtn">Exporter le récapitulatif (CSV)</button>
         </div>
       </div>
-      <div id="accountingSummary"></div>
-      <div class="btn-row">
-        <button class="btn secondary" id="exportAccountingCsvBtn">Exporter le récapitulatif (CSV)</button>
+    </div>
+
+    <!-- ÉCRITURES -->
+    <div class="compta-sub" id="compta-ecritures">
+      <div class="panel">
+        <div class="panel-title">Actions rapides</div>
+        <p class="helper" style="margin-bottom:12px;">Chaque action génère automatiquement la bonne écriture en partie double (débit/crédit) — aucune connaissance comptable requise.</p>
+        <div class="btn-row">
+          <button class="btn small" id="qa-encaisser-loyers">💶 Générer les encaissements de loyers manquants</button>
+          <button class="btn secondary small" id="qa-charge">➕ Enregistrer une charge / dépense</button>
+          <button class="btn secondary small" id="qa-produit">➕ Enregistrer un autre encaissement</button>
+          <button class="btn secondary small" id="qa-emprunt">🏦 Emprunt / remboursement</button>
+          <button class="btn secondary small" id="qa-libre">✎ Écriture libre</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Journal des écritures</div>
+        <div class="field-row">
+          <div><label>Exercice</label><select id="ecritures-year"></select></div>
+        </div>
+        <div id="ecrituresList"></div>
       </div>
     </div>
 
-    <div class="panel">
-      <div class="panel-title">Journal d'activité</div>
-      <p class="helper" style="margin-bottom:12px;">Qui a fait quoi, et quand — pour garder une trace claire entre les 4 personnes qui utilisent l'app.</p>
-      <div id="activityLogList"></div>
+    <!-- IMMOBILISATIONS -->
+    <div class="compta-sub" id="compta-immos">
+      <div class="panel">
+        <div class="panel-title">Immobilisations</div>
+        <p class="helper" style="margin-bottom:12px;">Le terrain n'est jamais amortissable ; seules les constructions et agencements se déprécient comptablement, en linéaire.</p>
+        <div id="immosList"></div>
+        <div class="btn-row"><button class="btn small" id="addImmoBtn">+ Ajouter une immobilisation</button></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Dotations aux amortissements</div>
+        <div class="field-row"><div><label>Exercice</label><select id="amort-year"></select></div></div>
+        <div id="amortPreview"></div>
+        <div class="btn-row"><button class="btn" id="genererAmortBtn">Calculer et enregistrer les dotations de l'exercice</button></div>
+      </div>
+    </div>
+
+    <!-- FACTURES -->
+    <div class="compta-sub" id="compta-factures">
+      <div class="panel">
+        <div class="panel-title">Ajouter une facture (travaux, rénovation, achats…)</div>
+        <p class="helper" style="margin-bottom:12px;">Garde le justificatif scanné avec la facture — tout est inclus dans la sauvegarde complète. L'écriture comptable correspondante est générée automatiquement.</p>
+        <div class="btn-row"><button class="btn small" id="addFactureBtn">+ Ajouter une facture</button></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Registre des factures</div>
+        <div id="facturesList"></div>
+      </div>
+    </div>
+
+    <!-- ASSOCIÉS -->
+    <div class="compta-sub" id="compta-assoc">
+      <div class="panel">
+        <div class="panel-title">Associés de la SCI</div>
+        <p class="helper" style="margin-bottom:12px;">Utilisé pour répartir les loyers perçus, les comptes courants, les dividendes et pour identifier qui modifie les données.</p>
+        <div id="associesList"></div>
+        <div class="btn-row">
+          <button class="btn secondary small" id="addAssocieBtn">+ Ajouter un associé</button>
+          <button class="btn" id="saveAssociesBtn">Enregistrer les associés</button>
+          <span class="helper" id="associesSaved" style="align-self:center;"></span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Comptes courants d'associés</div>
+        <p class="helper" style="margin-bottom:12px;">Solde créditeur = ce que la SCI doit à l'associé (avances de trésorerie, charges payées de sa poche…).</p>
+        <div id="ccAssociesList"></div>
+        <div class="btn-row">
+          <button class="btn secondary small" id="qa-apport-cc">+ Apport en compte courant</button>
+          <button class="btn secondary small" id="qa-remb-cc">− Remboursement de compte courant</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Dividendes</div>
+        <p class="helper" style="margin-bottom:12px;">Distribution du résultat aux associés au prorata de leurs parts — imposée entre les mains des associés (pas de la SCI).</p>
+        <div id="dividendesList"></div>
+        <div class="btn-row">
+          <button class="btn secondary small" id="qa-distribuer">Voter une distribution de dividende</button>
+          <button class="btn secondary small" id="qa-verser-dividende">Verser un dividende voté</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- BILAN -->
+    <div class="compta-sub" id="compta-bilan">
+      <div class="field-row"><div><label>Bilan au 31/12 de l'exercice</label><select id="bilan-year"></select></div></div>
+      <div id="bilanWrap"></div>
+      <div class="btn-row"><button class="btn secondary" id="exportBilanCsvBtn">Exporter le bilan (CSV)</button></div>
+    </div>
+
+    <!-- RÉSULTAT -->
+    <div class="compta-sub" id="compta-resultat">
+      <div class="field-row"><div><label>Exercice</label><select id="resultat-year"></select></div></div>
+      <div id="resultatWrap"></div>
+      <div class="btn-row"><button class="btn secondary" id="exportResultatCsvBtn">Exporter le compte de résultat (CSV)</button></div>
+    </div>
+
+    <!-- IS & ÉCHÉANCES -->
+    <div class="compta-sub" id="compta-is">
+      <div class="field-row"><div><label>Exercice</label><select id="is-year"></select></div></div>
+      <div id="isWrap"></div>
+    </div>
+
+    <!-- EXPORT & FEC -->
+    <div class="compta-sub" id="compta-export">
+      <div class="panel">
+        <div class="panel-title">Grand livre &amp; balance générale</div>
+        <div class="field-row"><div><label>Exercice</label><select id="gl-year"></select></div></div>
+        <div class="btn-row">
+          <button class="btn secondary small" id="exportGrandLivreBtn">Exporter le grand livre (CSV)</button>
+          <button class="btn secondary small" id="exportBalanceBtn">Exporter la balance générale (CSV)</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Clôture d'exercice</div>
+        <div class="field-row"><div><label>Exercice</label><select id="cloture-year"></select></div></div>
+        <div id="clotureWrap"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">FEC — Fichier des écritures comptables</div>
+        <p class="helper" style="margin-bottom:12px;">Format réglementaire (article A47 A-1 du LPF), à produire en cas de contrôle fiscal. Nécessite le SIRET (onglet SCI) et un exercice clôturé.</p>
+        <div class="field-row"><div><label>Exercice</label><select id="fec-year"></select></div></div>
+        <div class="btn-row"><button class="btn" id="exportFecBtn">Exporter le FEC</button></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Journal d'activité</div>
+        <p class="helper" style="margin-bottom:12px;">Qui a fait quoi, et quand — pour garder une trace claire entre les personnes qui utilisent l'app.</p>
+        <div id="activityLogList"></div>
+      </div>
     </div>
   </section>
 
@@ -691,7 +864,17 @@
         <button class="btn secondary" id="backupDriveNowBtn">Sauvegarder maintenant sur Google Drive</button>
         <span class="helper" id="backupActionMsg" style="align-self:center;"></span>
       </div>
-      <p class="helper" style="margin-top:8px;">Une sauvegarde automatique s'envoie aussi chaque nuit vers Google Drive, uniquement si des données ont changé depuis la veille.</p>
+      <p class="helper" style="margin-top:8px;">Une sauvegarde automatique s'envoie aussi chaque nuit vers Google Drive, uniquement si des données ont changé depuis la veille. Cette sauvegarde inclut TOUS les fichiers ajoutés dans l'app (pièces jointes des baux, factures de travaux…).</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Restaurer une sauvegarde complète</div>
+      <p class="helper" style="margin-bottom:10px;">⚠ Remplace <strong>toutes</strong> les données et pièces jointes actuelles par celles du fichier .zip choisi (baux, quittances, comptabilité, factures…). Les comptes de connexion ne sont pas touchés — tu restes connecté. Utilise un fichier téléchargé avec le bouton ci-dessus, ou récupéré depuis Google Drive.</p>
+      <div class="btn-row">
+        <input type="file" id="restoreFileInput" accept=".zip" style="display:none;">
+        <button class="btn danger" id="restoreFullBtn">Choisir un fichier .zip et restaurer…</button>
+        <span class="helper" id="restoreStatusMsg" style="align-self:center;"></span>
+      </div>
     </div>
   </section>
 
@@ -705,10 +888,18 @@
   </div>
 </div>
 
+<!-- Modal générique pour les formulaires de comptabilité (actions rapides, écriture libre, immobilisations) -->
+<div class="modal-bg" id="comptaModalBg">
+  <div class="modal" style="max-width:660px;">
+    <button class="modal-close" id="comptaModalClose">&times;</button>
+    <div id="comptaModalContent"></div>
+  </div>
+</div>
+
 <!-- Modal de confirmation générique (remplace window.confirm, bloqué dans le cadre Ingress) -->
 <div class="modal-bg" id="confirmModalBg">
   <div class="modal" style="max-width:420px;">
-    <p id="confirmModalMessage" style="margin:0 0 20px; line-height:1.5;"></p>
+    <p id="confirmModalMessage" style="margin:0 0 20px; line-height:1.5; white-space:pre-line;"></p>
     <div class="btn-row" style="justify-content:flex-end;">
       <button class="btn secondary" id="confirmModalCancel">Annuler</button>
       <button class="btn danger" id="confirmModalOk">Confirmer</button>
@@ -799,7 +990,7 @@
     const token = getToken();
     const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
     if(token) headers['Authorization'] = 'Bearer ' + token;
-    const res = await fetch(API_BASE + path, Object.assign({}, options, { headers }));
+    const res = await fetch(API_BASE + path, Object.assign({ cache: 'no-store' }, options, { headers }));
     if(res.status === 401){
       clearToken();
       showLoginScreen('Session expirée — reconnecte-toi.');
@@ -2719,10 +2910,1431 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     }
   });
 
+  // --- Restauration complète depuis un fichier .zip (données + pièces jointes) ---
+  function uint8ArrayToBase64(bytes){
+    let binary = '';
+    const chunkSize = 0x8000;
+    for(let i=0; i<bytes.length; i+=chunkSize){
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i+chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  document.getElementById('restoreFullBtn').addEventListener('click', ()=>{
+    document.getElementById('restoreFileInput').click();
+  });
+
+  document.getElementById('restoreFileInput').addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    e.target.value = '';
+    if(!file) return;
+    const statusEl = document.getElementById('restoreStatusMsg');
+    statusEl.style.color = '';
+    statusEl.textContent = 'Lecture du fichier…';
+    try{
+      const buffer = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(buffer);
+      const donneesFile = zip.file('donnees.json');
+      if(!donneesFile) throw new Error("Ce fichier ne contient pas de donnees.json — ce n'est pas une sauvegarde valide de cette application.");
+      const restoredData = JSON.parse(await donneesFile.async('string'));
+      if(!restoredData || !Array.isArray(restoredData.apartments)) throw new Error('Le contenu de donnees.json est invalide.');
+
+      const manifestFile = zip.file('pieces-jointes/manifeste.json');
+      const manifest = manifestFile ? JSON.parse(await manifestFile.async('string')) : [];
+
+      statusEl.textContent = `Lecture de ${manifest.length} pièce(s) jointe(s)…`;
+      const attachments = [];
+      for(const entry of manifest){
+        const safeName = `${entry.leaseId}__${entry.name}`.replace(/[/\\]/g, '_');
+        const zipEntry = zip.file('pieces-jointes/' + safeName);
+        if(!zipEntry) continue; // pièce jointe manquante dans l'archive : ignorée, le reste se restaure quand même
+        const bytes = await zipEntry.async('uint8array');
+        attachments.push({ id: entry.id, leaseId: entry.leaseId, name: entry.name, mimeType: entry.mimeType, uploadedAt: entry.uploadedAt, base64: uint8ArrayToBase64(bytes) });
+      }
+
+      const resume = [
+        `Baux : ${(restoredData.leases||[]).length}`,
+        `Quittances : ${(restoredData.quittances||[]).length}`,
+        `Écritures comptables : ${((restoredData.compta||{}).ecritures||[]).length}`,
+        `Pièces jointes : ${attachments.length}`
+      ].join('\n');
+      statusEl.textContent = '';
+      if(!(await confirmDialog(`Restaurer cette sauvegarde va remplacer TOUTES les données actuelles par :\n\n${resume}\n\nCette action est irréversible (sauf à restaurer une autre sauvegarde ensuite). Continuer ?`))) return;
+
+      statusEl.textContent = 'Restauration en cours…';
+      const result = await api('api/restore-full', { method: 'POST', body: JSON.stringify({ data: restoredData, attachments }) });
+      statusEl.textContent = '';
+      // Remplacement complet (pas de fusion) : fetchRemoteData() fusionne avec l'existant
+      // via Object.assign, ce qui est voulu pour la synchronisation normale (préserve les
+      // sections encore absentes du serveur lors d'une migration) mais est faux ici — une
+      // restauration doit effacer entièrement l'état précédent, y compris les sections
+      // qu'une sauvegarde plus ancienne ne contient pas encore.
+      applyingRemoteUpdate = true;
+      try{
+        const freshBody = await api('api/data');
+        DATA = freshBody.data;
+        ensureCompta();
+        logActivity('Sauvegarde complète restaurée depuis ' + file.name);
+        renderAll();
+      } finally {
+        applyingRemoteUpdate = false;
+      }
+      saveData();
+      notify(`✓ Sauvegarde restaurée (${result.attachmentsRestored} pièce(s) jointe(s)).`);
+    }catch(err){
+      statusEl.style.color = 'var(--brick-dark)';
+      statusEl.textContent = '';
+      notify('⚠ Échec de la restauration : ' + (err && err.message || err), true);
+    }
+  });
+
   function renderModeNotice(){
     const wrap = document.getElementById('modeNotice');
     if(!wrap) return;
     wrap.innerHTML = `<div class="mode-notice">Envoi des quittances par email : le PDF se télécharge et votre client mail s'ouvre avec le message pré-rempli — il suffit de joindre le fichier téléchargé et de cliquer sur envoyer.</div>`;
+  }
+
+  // ===========================================================================
+  // COMPTABILITÉ — SCI à l'IS (comptabilité d'engagement en partie double)
+  // ===========================================================================
+  // Plan comptable simplifié (PCG) couvrant les opérations courantes d'une SCI
+  // familiale soumise à l'IS : capitaux, immobilisations, tiers, trésorerie,
+  // charges et produits. "nature" = sens créditeur/débiteur normal du compte,
+  // utilisé pour présenter des soldes toujours positifs à l'écran.
+  const PLAN_COMPTABLE_DEFAULT = [
+    { compte:'101000', libelle:'Capital social', type:'passif', nature:'C' },
+    { compte:'106800', libelle:'Réserves diverses', type:'passif', nature:'C' },
+    { compte:'110000', libelle:'Report à nouveau', type:'passif', nature:'C' },
+    { compte:'164000', libelle:"Emprunts auprès des établissements de crédit", type:'passif', nature:'C' },
+    { compte:'211000', libelle:'Terrains', type:'actif', nature:'D' },
+    { compte:'213000', libelle:'Constructions', type:'actif', nature:'D' },
+    { compte:'218100', libelle:'Installations, agencements, aménagements', type:'actif', nature:'D' },
+    { compte:'281300', libelle:'Amortissements des constructions', type:'actif_contra', nature:'C' },
+    { compte:'281810', libelle:'Amortissements des installations et agencements', type:'actif_contra', nature:'C' },
+    { compte:'401000', libelle:'Fournisseurs', type:'passif', nature:'C' },
+    { compte:'404000', libelle:"Fournisseurs d'immobilisations", type:'passif', nature:'C' },
+    { compte:'411000', libelle:'Locataires — comptes clients', type:'actif', nature:'D' },
+    { compte:'444000', libelle:"État — Impôt sur les sociétés", type:'passif', nature:'C' },
+    { compte:'445660', libelle:'État — TVA déductible', type:'actif', nature:'D' },
+    { compte:'455000', libelle:'Associés — comptes courants', type:'passif', nature:'C' },
+    { compte:'457000', libelle:'Associés — dividendes à payer', type:'passif', nature:'C' },
+    { compte:'512000', libelle:'Banque', type:'actif', nature:'D' },
+    { compte:'530000', libelle:'Caisse', type:'actif', nature:'D' },
+    { compte:'613000', libelle:'Locations diverses (matériel, coffres…)', type:'charge', nature:'D' },
+    { compte:'615000', libelle:'Entretien et réparations', type:'charge', nature:'D' },
+    { compte:'616000', libelle:"Primes d'assurance", type:'charge', nature:'D' },
+    { compte:'618000', libelle:'Documentation, divers', type:'charge', nature:'D' },
+    { compte:'622600', libelle:'Honoraires (comptable, syndic, gestion)', type:'charge', nature:'D' },
+    { compte:'626000', libelle:'Frais postaux et télécommunications', type:'charge', nature:'D' },
+    { compte:'627000', libelle:'Services bancaires', type:'charge', nature:'D' },
+    { compte:'631200', libelle:'Taxes foncières', type:'charge', nature:'D' },
+    { compte:'635800', libelle:'Autres impôts et taxes', type:'charge', nature:'D' },
+    { compte:'661000', libelle:"Charges d'intérêts (emprunts)", type:'charge', nature:'D' },
+    { compte:'681120', libelle:'Dotations aux amortissements des immobilisations', type:'charge', nature:'D' },
+    { compte:'695000', libelle:'Impôt sur les bénéfices (IS)', type:'charge', nature:'D' },
+    { compte:'706100', libelle:'Loyers', type:'produit', nature:'C' },
+    { compte:'708000', libelle:'Produits accessoires (charges locatives refacturées)', type:'produit', nature:'C' },
+    { compte:'758800', libelle:'Produits divers de gestion courante', type:'produit', nature:'C' }
+  ];
+  const JOURNAUX = { BQ:'Banque', AC:'Achats', VE:'Ventes', OD:'Opérations diverses', IM:'Immobilisations' };
+
+  function ensureCompta(){
+    if(!DATA.compta || typeof DATA.compta !== 'object') DATA.compta = {};
+    const c = DATA.compta;
+    if(!Array.isArray(c.planComptable) || !c.planComptable.length) c.planComptable = JSON.parse(JSON.stringify(PLAN_COMPTABLE_DEFAULT));
+    if(!Array.isArray(c.ecritures)) c.ecritures = [];
+    if(!Array.isArray(c.immobilisations)) c.immobilisations = [];
+    if(!Array.isArray(c.factures)) c.factures = [];
+    if(!c.exercices || typeof c.exercices !== 'object') c.exercices = {};
+    if(typeof c.nextEcritureNum !== 'number') c.nextEcritureNum = 1;
+    if(!c.reglages || typeof c.reglages !== 'object') c.reglages = {};
+    if(typeof c.reglages.clotureMonth !== 'number') c.reglages.clotureMonth = 12;
+    if(typeof c.reglages.clotureDay !== 'number') c.reglages.clotureDay = 31;
+    if(typeof c.reglages.tauxReduit !== 'number') c.reglages.tauxReduit = 15;
+    if(typeof c.reglages.seuilReduit !== 'number') c.reglages.seuilReduit = 42500;
+    if(typeof c.reglages.tauxNormal !== 'number') c.reglages.tauxNormal = 25;
+    return c;
+  }
+
+  function compteDef(code){
+    const c = ensureCompta();
+    return c.planComptable.find(p=>p.compte===code) || { compte:code, libelle:'(compte inconnu)', type:'charge', nature:'D' };
+  }
+
+  function pad2(n){ return String(n).padStart(2,'0'); }
+
+  function dateClotureExercice(year){
+    const c = ensureCompta();
+    return `${year}-${pad2(c.reglages.clotureMonth)}-${pad2(c.reglages.clotureDay)}`;
+  }
+  function dateDebutExercice(year){
+    const prevCloture = dateClotureExercice(String(Number(year)-1));
+    const d = new Date(prevCloture+'T00:00:00');
+    d.setDate(d.getDate()+1);
+    return d.toISOString().slice(0,10);
+  }
+  function exerciceDeDate(dateStr){
+    const c = ensureCompta();
+    if(c.reglages.clotureMonth===12 && c.reglages.clotureDay===31) return dateStr.slice(0,4);
+    const [y,m,d] = dateStr.split('-').map(Number);
+    const cloture = new Date(y, c.reglages.clotureMonth-1, c.reglages.clotureDay);
+    const courant = new Date(y, m-1, d);
+    return String(courant <= cloture ? y : y+1);
+  }
+  function getExerciceMeta(year){
+    const c = ensureCompta();
+    return c.exercices[year] || { cloture:false, dateCloture:null, ajustementFiscal:0, deficitImputeManuel:0, tauxReduitEligible:true, isPaye:false };
+  }
+  function setExerciceMeta(year, patch){
+    const c = ensureCompta();
+    c.exercices[year] = Object.assign({}, getExerciceMeta(year), patch);
+    return c.exercices[year];
+  }
+
+  function anneesDisponibles(){
+    const c = ensureCompta();
+    const years = new Set([String(new Date().getFullYear())]);
+    c.ecritures.forEach(e=> years.add(e.exercice));
+    Object.keys(c.exercices).forEach(y=> years.add(y));
+    DATA.quittances.forEach(q=>{ if(q.month) years.add(q.month.split('-')[0]); });
+    return Array.from(years).sort((a,b)=>b-a);
+  }
+
+  function populateYearSelect(id, { keepSelection } = { keepSelection:true }){
+    const sel = document.getElementById(id);
+    if(!sel) return;
+    const years = anneesDisponibles();
+    const current = keepSelection && sel.value ? sel.value : String(new Date().getFullYear());
+    sel.innerHTML = years.map(y=>`<option value="${y}" ${y===current?'selected':''}>${y}</option>`).join('');
+    if(!sel.value && years.length) sel.value = years[0];
+  }
+
+  // ---------- ÉCRITURES (partie double) ----------
+  function addEcriture({ date, journal, piece, libelle, lignes, source, sourceId }){
+    const c = ensureCompta();
+    const totalDebit = lignes.reduce((s,l)=> s + (Number(l.debit)||0), 0);
+    const totalCredit = lignes.reduce((s,l)=> s + (Number(l.credit)||0), 0);
+    if(Math.abs(totalDebit - totalCredit) > 0.01){
+      throw new Error(`Écriture déséquilibrée : débit ${totalDebit.toFixed(2)} € ≠ crédit ${totalCredit.toFixed(2)} €.`);
+    }
+    if(totalDebit === 0){ throw new Error('Montant nul : rien à enregistrer.'); }
+    const year = exerciceDeDate(date);
+    const meta = getExerciceMeta(year);
+    if(meta.cloture) throw new Error(`L'exercice ${year} est clôturé. Rouvrez-le (onglet Export & FEC) avant d'ajouter une écriture à cette date.`);
+    const num = c.nextEcritureNum++;
+    const ecr = {
+      id: uid('ecr'), num, date, journal, piece: piece || ('P' + num), libelle,
+      lignes: lignes.filter(l=> (Number(l.debit)||0) !== 0 || (Number(l.credit)||0) !== 0).map(l=> ({
+        compte: l.compte, libelle: l.libelle || libelle,
+        debit: Number(l.debit) || 0, credit: Number(l.credit) || 0,
+        compAuxNum: l.compAuxNum || '', compAuxLib: l.compAuxLib || ''
+      })),
+      exercice: year, source: source || 'manuel', sourceId: sourceId || null,
+      createdAt: new Date().toISOString(), createdBy: getWhoAmI() || ''
+    };
+    c.ecritures.push(ecr);
+    return ecr;
+  }
+  function deleteEcriture(id){
+    const c = ensureCompta();
+    const idx = c.ecritures.findIndex(e=>e.id===id);
+    if(idx < 0) return;
+    const ecr = c.ecritures[idx];
+    if(getExerciceMeta(ecr.exercice).cloture) throw new Error(`L'exercice ${ecr.exercice} est clôturé : rouvrez-le avant de supprimer cette écriture.`);
+    c.ecritures.splice(idx,1);
+  }
+
+  // ---------- SOLDES / BALANCE / BILAN / RÉSULTAT ----------
+  function computeBalance({ dateDebut, dateFin } = {}){
+    const c = ensureCompta();
+    const map = {};
+    c.ecritures.forEach(e=>{
+      if(dateFin && e.date > dateFin) return;
+      if(dateDebut && e.date < dateDebut) return;
+      e.lignes.forEach(l=>{
+        if(!map[l.compte]) map[l.compte] = { debit:0, credit:0 };
+        map[l.compte].debit += l.debit;
+        map[l.compte].credit += l.credit;
+      });
+    });
+    return Object.entries(map).map(([compte, v])=>{
+      const def = compteDef(compte);
+      return { compte, libelle: def.libelle, type: def.type, debit: v.debit, credit: v.credit, solde: v.debit - v.credit };
+    }).sort((a,b)=> a.compte.localeCompare(b.compte));
+  }
+  function sumSoldePrefix(bal, prefix){
+    return bal.filter(b=> b.compte.startsWith(prefix)).reduce((s,b)=> s + b.solde, 0);
+  }
+
+  function computeCompteResultat(year){
+    const dateDebut = dateDebutExercice(year);
+    const dateFin = dateClotureExercice(year);
+    const bal = computeBalance({ dateDebut, dateFin });
+    const produitsDetail = bal.filter(b=> b.compte.startsWith('7')).map(b=> ({ ...b, montant: -b.solde }));
+    const chargesDetail = bal.filter(b=> b.compte.startsWith('6')).map(b=> ({ ...b, montant: b.solde }));
+    const totalProduits = produitsDetail.reduce((s,b)=> s + b.montant, 0);
+    const totalCharges = chargesDetail.reduce((s,b)=> s + b.montant, 0);
+    return { dateDebut, dateFin, produitsDetail, chargesDetail, totalProduits, totalCharges, resultat: totalProduits - totalCharges };
+  }
+
+  function computeBilan(year){
+    const dateFin = dateClotureExercice(year);
+    const bal = computeBalance({ dateFin });
+    const S = (prefix)=> sumSoldePrefix(bal, prefix);
+
+    const terrains = S('211');
+    const constructionsBrut = S('213') + S('2181');
+    const amortissementsCumules = -(S('2813') + S('28181'));
+    const immoNet = terrains + constructionsBrut - amortissementsCumules;
+    const clients = S('411');
+    const tvaDeductible = S('44566');
+    const banque = S('512') + S('530');
+    const totalActif = immoNet + clients + tvaDeductible + banque;
+
+    const capital = -(S('101') + S('1068'));
+    const emprunts = -S('164');
+    const fournisseurs = -(S('401') + S('404'));
+    const isAPayer = -S('444');
+    const ccAssocies = -S('455');
+    const dividendesAPayer = -S('457');
+    const produitsCumules = -S('7');
+    const chargesCumulees = S('6');
+    const resultatCumule = produitsCumules - chargesCumulees;
+    const totalPassifHorsResultat = capital + emprunts + fournisseurs + isAPayer + ccAssocies + dividendesAPayer;
+    const totalPassif = totalPassifHorsResultat + resultatCumule;
+
+    return {
+      dateFin,
+      actif: { terrains, constructionsBrut, amortissementsCumules, immoNet, clients, tvaDeductible, banque, total: totalActif },
+      passif: { capital, emprunts, fournisseurs, isAPayer, ccAssocies, dividendesAPayer, resultatCumule, total: totalPassif }
+    };
+  }
+
+  function ccAssocieSolde(associeId){
+    const c = ensureCompta();
+    let debit = 0, credit = 0;
+    c.ecritures.forEach(e=> e.lignes.forEach(l=>{
+      if(l.compte === '455000' && l.compAuxNum === associeId){ debit += l.debit; credit += l.credit; }
+    }));
+    return credit - debit; // positif = la SCI doit à l'associé
+  }
+  function dividendeDuAssocie(associeId){
+    const c = ensureCompta();
+    let debit = 0, credit = 0;
+    c.ecritures.forEach(e=> e.lignes.forEach(l=>{
+      if(l.compte === '457000' && l.compAuxNum === associeId){ debit += l.debit; credit += l.credit; }
+    }));
+    return credit - debit;
+  }
+
+  // ---------- IMMOBILISATIONS & AMORTISSEMENTS ----------
+  function joursConv360(dateStr){
+    const [y,m,d] = dateStr.split('-').map(Number);
+    return y*360 + (m-1)*30 + (d-1);
+  }
+  function joursEntre360(debut, fin){ return joursConv360(fin) - joursConv360(debut) + 1; }
+  function addAnnees(dateStr, n){
+    const [y,m,d] = dateStr.split('-').map(Number);
+    return `${y+Number(n)}-${pad2(m)}-${pad2(d)}`;
+  }
+  function ecrituresAmortImmo(immoId){
+    const c = ensureCompta();
+    return c.ecritures.filter(e=> e.source==='amortissement' && e.sourceId && e.sourceId.indexOf(immoId+':')===0);
+  }
+  function amortiCumuleAvant(immo, dateLimiteExclusive){
+    return ecrituresAmortImmo(immo.id).filter(e=> e.date < dateLimiteExclusive)
+      .reduce((s,e)=> s + e.lignes.filter(l=>l.compte.startsWith('28')).reduce((s2,l)=> s2+l.credit, 0), 0);
+  }
+  function calculDotationAmortissement(immo, year){
+    if(!immo.valeurAmortissable || !immo.dureeAns) return 0;
+    const dateFin = dateClotureExercice(year);
+    const dateDebutEx = dateDebutExercice(year);
+    const miseEnService = immo.dateMiseEnService || immo.dateAcquisition;
+    if(!miseEnService || miseEnService > dateFin) return 0;
+    const finAmort = addAnnees(miseEnService, immo.dureeAns);
+    if(miseEnService >= finAmort) return 0;
+    const debutPeriode = miseEnService > dateDebutEx ? miseEnService : dateDebutEx;
+    const finPeriode = finAmort < dateFin ? finAmort : dateFin;
+    if(finPeriode <= debutPeriode) return 0;
+    const annuite = Number(immo.valeurAmortissable) / Number(immo.dureeAns);
+    const jours = joursEntre360(debutPeriode, finPeriode);
+    const dotationBrute = annuite * (jours/360);
+    const dejaAmorti = amortiCumuleAvant(immo, dateDebutEx);
+    const restant = Number(immo.valeurAmortissable) - dejaAmorti;
+    return Math.max(0, Math.min(dotationBrute, restant));
+  }
+  function comptesAmortPourImmo(immo){
+    return immo.compte === '213000' ? { immoCompte:'213000', amortCompte:'281300' } : { immoCompte:'218100', amortCompte:'281810' };
+  }
+  function genererDotationsExercice(year){
+    const c = ensureCompta();
+    const meta = getExerciceMeta(year);
+    if(meta.cloture) throw new Error(`L'exercice ${year} est clôturé.`);
+    let count = 0;
+    c.immobilisations.forEach(immo=>{
+      if(!immo.valeurAmortissable || immo.cedeLe) return;
+      const sourceId = `${immo.id}:${year}`;
+      if(c.ecritures.some(e=> e.sourceId === sourceId)) return;
+      const montant = calculDotationAmortissement(immo, year);
+      if(montant <= 0) return;
+      const { amortCompte } = comptesAmortPourImmo(immo);
+      addEcriture({
+        date: dateClotureExercice(year), journal:'OD', piece:'DOT-'+year,
+        libelle: `Dotation amortissement ${year} — ${immo.libelle}`,
+        lignes: [
+          { compte:'681120', debit: montant, libelle:`Dotation amortissement — ${immo.libelle}` },
+          { compte: amortCompte, credit: montant, libelle:`Dotation amortissement — ${immo.libelle}` }
+        ],
+        source:'amortissement', sourceId
+      });
+      count++;
+    });
+    return count;
+  }
+
+  // ---------- IS ----------
+  function deficitsAnterieursDisponibles(year){
+    const c = ensureCompta();
+    let total = 0;
+    Object.keys(c.exercices).forEach(y=>{
+      if(Number(y) < Number(year)){
+        const m = c.exercices[y];
+        if(m && m.cloture){
+          const cr = computeCompteResultat(y);
+          const rf = cr.resultat + (Number(m.ajustementFiscal)||0);
+          if(rf < 0) total += -rf;
+          total -= Number(m.deficitImputeManuel)||0;
+        }
+      }
+    });
+    return Math.max(0, total);
+  }
+  function calculIS(year){
+    const c = ensureCompta();
+    const meta = getExerciceMeta(year);
+    const cr = computeCompteResultat(year);
+    const resultatComptable = cr.resultat;
+    const ajustement = Number(meta.ajustementFiscal)||0;
+    const resultatFiscalAvantDeficit = resultatComptable + ajustement;
+    const deficitImpute = Number(meta.deficitImputeManuel)||0;
+    const resultatImposable = Math.max(0, resultatFiscalAvantDeficit - deficitImpute);
+    const eligibleReduit = meta.tauxReduitEligible !== false;
+    const seuil = c.reglages.seuilReduit;
+    const tauxReduit = c.reglages.tauxReduit/100;
+    const tauxNormal = c.reglages.tauxNormal/100;
+    let is = 0, baseReduite = 0, baseNormale = 0;
+    if(resultatImposable > 0){
+      if(eligibleReduit){
+        baseReduite = Math.min(resultatImposable, seuil);
+        baseNormale = Math.max(0, resultatImposable - seuil);
+      } else {
+        baseNormale = resultatImposable;
+      }
+      is = baseReduite*tauxReduit + baseNormale*tauxNormal;
+    }
+    return {
+      resultatComptable, ajustement, resultatFiscalAvantDeficit,
+      deficitDisponible: deficitsAnterieursDisponibles(year), deficitImpute, resultatImposable,
+      eligibleReduit, seuil, tauxReduit, tauxNormal, baseReduite, baseNormale, is
+    };
+  }
+  function ajouterMoisDate(dateStr, n){
+    const [y,m,d] = dateStr.split('-').map(Number);
+    const total = (m-1) + n;
+    const ny = y + Math.floor(total/12);
+    const nm = (total%12)+1;
+    const dernierJour = new Date(ny, nm, 0).getDate();
+    return `${ny}-${pad2(nm)}-${pad2(Math.min(d,dernierJour))}`;
+  }
+  function echeancesIS(year){
+    const dateFin = dateClotureExercice(year);
+    const declaration = ajouterMoisDate(dateFin, 3);
+    const isN1 = calculIS(String(Number(year)-1)).is;
+    const acomptesDus = isN1 > 3000;
+    const acomptes = [];
+    if(acomptesDus){
+      const mDebut = dateClotureExercice(year).slice(5,7) === '12' ? [3,6,9,12] : null;
+      // Échéances standard pour un exercice calé sur l'année civile ; pour un exercice
+      // décalé, les dates réglementaires (15 du 4e/7e/10e/1er mois de l'exercice) diffèrent
+      // et doivent être vérifiées au cas par cas.
+      if(mDebut){
+        [`${year}-03-15`, `${year}-06-15`, `${year}-09-15`, `${year}-12-15`].forEach(d=> acomptes.push({ date:d, montant: isN1/4 }));
+      }
+    }
+    return { dateFin, declaration, acomptesDus, acomptes, isN1 };
+  }
+
+  // ---------- QUICK ACTIONS ----------
+  function genererEncaissementsLoyers(){
+    const manquantes = DATA.quittances.filter(q=> q.datePaid && !q.ecritureId);
+    if(manquantes.length === 0){ notify('Aucun encaissement de loyer à générer : tout est déjà comptabilisé.'); return; }
+    let count = 0, skipped = 0;
+    manquantes.forEach(q=>{
+      const lignes = [{ compte:'512000', debit: Number(q.total)||0, libelle:`Encaissement loyer — ${q.tenant}` }];
+      if(Number(q.loyer)) lignes.push({ compte:'706100', credit: Number(q.loyer), libelle:`Loyer ${q.monthLabel} — ${q.tenant}` });
+      if(Number(q.charges)) lignes.push({ compte:'708000', credit: Number(q.charges), libelle:`Charges refacturées ${q.monthLabel} — ${q.tenant}` });
+      try{
+        const ecr = addEcriture({
+          date: q.datePaid, journal:'BQ', piece:'Q-'+q.id.slice(-6),
+          libelle: `Loyer ${q.monthLabel} — ${q.tenant}`, lignes, source:'quittance', sourceId: q.id
+        });
+        q.ecritureId = ecr.id;
+        count++;
+      }catch(err){ skipped++; }
+    });
+    if(count>0){ logActivity(`${count} encaissement(s) de loyer comptabilisé(s)`); saveData(); renderAll(); }
+    if(count>0 && skipped===0) notify(`${count} écriture(s) d'encaissement de loyer générée(s).`);
+    else if(count>0 && skipped>0) notify(`${count} écriture(s) générée(s), ${skipped} ignorée(s) (exercice clôturé — rouvrez-le pour les inclure).`, true);
+    else notify(`Aucune écriture générée : l'exercice concerné est clôturé. Rouvrez-le (onglet Export & FEC).`, true);
+  }
+
+  const COMPTES_CHARGE = PLAN_COMPTABLE_DEFAULT.filter(p=> p.type==='charge' && p.compte!=='681120' && p.compte!=='695000');
+  const COMPTES_PRODUIT = PLAN_COMPTABLE_DEFAULT.filter(p=> p.type==='produit');
+
+  function openComptaModal(html){
+    document.getElementById('comptaModalContent').innerHTML = html;
+    document.getElementById('comptaModalBg').classList.add('open');
+  }
+  function closeComptaModal(){ document.getElementById('comptaModalBg').classList.remove('open'); }
+  document.getElementById('comptaModalClose').addEventListener('click', closeComptaModal);
+  document.getElementById('comptaModalBg').addEventListener('click', (e)=>{ if(e.target.id==='comptaModalBg') closeComptaModal(); });
+
+  function todayISO(){ return new Date().toISOString().slice(0,10); }
+
+  document.getElementById('qa-charge').addEventListener('click', ()=>{
+    openComptaModal(`
+      <h3 style="margin-top:0">Enregistrer une charge / dépense</h3>
+      <div class="field-row">
+        <div><label>Date</label><input type="date" id="qc-date" value="${todayISO()}"></div>
+        <div><label>Nature de la charge</label><select id="qc-compte">${COMPTES_CHARGE.map(c=>`<option value="${c.compte}">${c.libelle}</option>`).join('')}</select></div>
+      </div>
+      <div class="field-row">
+        <div><label>Libellé</label><input id="qc-libelle" placeholder="Ex : Assurance PNO 2025"></div>
+        <div><label>Montant (€ TTC)</label><input type="number" step="0.01" id="qc-montant"></div>
+      </div>
+      <div class="field-row">
+        <div><label>Réglé par</label><select id="qc-mode">
+          <option value="banque">Banque (déjà payé)</option>
+          <option value="fournisseur">Fournisseur (à payer plus tard)</option>
+          <option value="cc">Associé sur ses fonds propres (compte courant)</option>
+        </select></div>
+        <div id="qc-associe-wrap" style="display:none;"><label>Associé</label><select id="qc-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name}</option>`).join('')}</select></div>
+      </div>
+      <div class="btn-row"><button class="btn" id="qc-submit">Enregistrer</button></div>
+    `);
+    document.getElementById('qc-mode').addEventListener('change', (e)=>{
+      document.getElementById('qc-associe-wrap').style.display = e.target.value==='cc' ? 'block' : 'none';
+    });
+    document.getElementById('qc-submit').addEventListener('click', ()=>{
+      const date = document.getElementById('qc-date').value;
+      const compte = document.getElementById('qc-compte').value;
+      const libelle = document.getElementById('qc-libelle').value.trim() || compteDef(compte).libelle;
+      const montant = Number(document.getElementById('qc-montant').value);
+      const mode = document.getElementById('qc-mode').value;
+      if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
+      try{
+        const contrepartie = mode==='banque' ? { compte:'512000', credit:montant }
+          : mode==='fournisseur' ? { compte:'401000', credit:montant, libelle }
+          : (()=>{ const sel=document.getElementById('qc-associe'); return { compte:'455000', credit:montant, compAuxNum:sel.value, compAuxLib: sel.selectedOptions[0].dataset.name }; })();
+        addEcriture({ date, journal: mode==='banque'?'BQ':'AC', libelle, lignes:[ { compte, debit:montant, libelle }, contrepartie ] });
+        logActivity(`Charge enregistrée : ${libelle} (${fmtEUR(montant)})`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Charge enregistrée.');
+      }catch(err){ notify(err.message, true); }
+    });
+  });
+
+  document.getElementById('qa-produit').addEventListener('click', ()=>{
+    openComptaModal(`
+      <h3 style="margin-top:0">Enregistrer un autre encaissement</h3>
+      <div class="field-row">
+        <div><label>Date</label><input type="date" id="qp-date" value="${todayISO()}"></div>
+        <div><label>Nature</label><select id="qp-compte">${COMPTES_PRODUIT.map(c=>`<option value="${c.compte}">${c.libelle}</option>`).join('')}</select></div>
+      </div>
+      <div class="field-row">
+        <div><label>Libellé</label><input id="qp-libelle" placeholder="Ex : Remboursement sinistre assurance"></div>
+        <div><label>Montant (€)</label><input type="number" step="0.01" id="qp-montant"></div>
+      </div>
+      <div class="btn-row"><button class="btn" id="qp-submit">Enregistrer</button></div>
+    `);
+    document.getElementById('qp-submit').addEventListener('click', ()=>{
+      const date = document.getElementById('qp-date').value;
+      const compte = document.getElementById('qp-compte').value;
+      const libelle = document.getElementById('qp-libelle').value.trim() || compteDef(compte).libelle;
+      const montant = Number(document.getElementById('qp-montant').value);
+      if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
+      try{
+        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'512000', debit:montant, libelle }, { compte, credit:montant, libelle } ] });
+        logActivity(`Encaissement enregistré : ${libelle} (${fmtEUR(montant)})`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Encaissement enregistré.');
+      }catch(err){ notify(err.message, true); }
+    });
+  });
+
+  document.getElementById('qa-emprunt').addEventListener('click', ()=>{
+    openComptaModal(`
+      <h3 style="margin-top:0">Emprunt / remboursement</h3>
+      <div class="field-row">
+        <div><label>Opération</label><select id="qe-type"><option value="souscription">Souscription d'un nouvel emprunt</option><option value="echeance">Remboursement d'une échéance</option></select></div>
+        <div><label>Date</label><input type="date" id="qe-date" value="${todayISO()}"></div>
+      </div>
+      <div id="qe-fields"></div>
+      <div class="btn-row"><button class="btn" id="qe-submit">Enregistrer</button></div>
+    `);
+    function renderFields(){
+      const type = document.getElementById('qe-type').value;
+      document.getElementById('qe-fields').innerHTML = type==='souscription' ? `
+        <div class="field-row">
+          <div><label>Libellé</label><input id="qe-libelle" value="Souscription d'emprunt"></div>
+          <div><label>Montant reçu (€)</label><input type="number" step="0.01" id="qe-capital"></div>
+        </div>
+      ` : `
+        <div class="field-row">
+          <div><label>Libellé</label><input id="qe-libelle" value="Échéance d'emprunt"></div>
+          <div><label>Part capital (€)</label><input type="number" step="0.01" id="qe-capital"></div>
+          <div><label>Part intérêts (€)</label><input type="number" step="0.01" id="qe-interets"></div>
+        </div>
+      `;
+    }
+    renderFields();
+    document.getElementById('qe-type').addEventListener('change', renderFields);
+    document.getElementById('qe-submit').addEventListener('click', ()=>{
+      const type = document.getElementById('qe-type').value;
+      const date = document.getElementById('qe-date').value;
+      const libelle = document.getElementById('qe-libelle').value.trim() || 'Emprunt';
+      const capital = Number(document.getElementById('qe-capital').value)||0;
+      const interets = type==='echeance' ? (Number(document.getElementById('qe-interets').value)||0) : 0;
+      if(!date || capital<=0){ notify('Date et montant valides requis.', true); return; }
+      try{
+        if(type==='souscription'){
+          addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'512000', debit:capital, libelle }, { compte:'164000', credit:capital, libelle } ] });
+        } else {
+          const lignes = [ { compte:'164000', debit:capital, libelle } ];
+          if(interets>0) lignes.push({ compte:'661000', debit:interets, libelle:'Intérêts emprunt' });
+          lignes.push({ compte:'512000', credit: capital+interets, libelle });
+          addEcriture({ date, journal:'BQ', libelle, lignes });
+        }
+        logActivity(`Emprunt : ${libelle} (${fmtEUR(capital+interets)})`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Opération enregistrée.');
+      }catch(err){ notify(err.message, true); }
+    });
+  });
+
+  document.getElementById('qa-libre').addEventListener('click', ()=> openEcritureLibreModal());
+  function openEcritureLibreModal(){
+    const c = ensureCompta();
+    const optionsComptes = c.planComptable.map(p=>`<option value="${p.compte}">${p.compte} — ${p.libelle}</option>`).join('');
+    openComptaModal(`
+      <h3 style="margin-top:0">Écriture libre</h3>
+      <div class="field-row">
+        <div><label>Date</label><input type="date" id="ql-date" value="${todayISO()}"></div>
+        <div><label>Journal</label><select id="ql-journal">${Object.entries(JOURNAUX).map(([k,v])=>`<option value="${k}">${k} — ${v}</option>`).join('')}</select></div>
+        <div><label>Pièce</label><input id="ql-piece" placeholder="Facture n°…"></div>
+      </div>
+      <div class="field-row"><div><label>Libellé de l'écriture</label><input id="ql-libelle"></div></div>
+      <div id="ql-lignes"></div>
+      <div class="btn-row"><button class="btn secondary small" id="ql-add-ligne">+ Ligne</button></div>
+      <p class="helper" id="ql-totaux" style="margin:10px 0;"></p>
+      <div class="btn-row"><button class="btn" id="ql-submit">Enregistrer l'écriture</button></div>
+    `);
+    function ligneRow(){
+      const row = document.createElement('div');
+      row.className = 'free-entry-row';
+      row.innerHTML = `
+        <select class="ql-compte">${optionsComptes}</select>
+        <input class="ql-lib" placeholder="Libellé ligne">
+        <input class="ql-debit" type="number" step="0.01" placeholder="Débit">
+        <input class="ql-credit" type="number" step="0.01" placeholder="Crédit">
+        <button type="button" class="btn danger small ql-del">✕</button>
+      `;
+      row.querySelector('.ql-del').addEventListener('click', ()=>{ row.remove(); updateTotaux(); });
+      row.querySelector('.ql-debit').addEventListener('input', updateTotaux);
+      row.querySelector('.ql-credit').addEventListener('input', updateTotaux);
+      return row;
+    }
+    function updateTotaux(){
+      const rows = document.querySelectorAll('#ql-lignes .free-entry-row');
+      let debit=0, credit=0;
+      rows.forEach(r=>{ debit += Number(r.querySelector('.ql-debit').value)||0; credit += Number(r.querySelector('.ql-credit').value)||0; });
+      const eq = Math.abs(debit-credit) < 0.01;
+      document.getElementById('ql-totaux').innerHTML = `Débit : <strong>${fmtEUR(debit)}</strong> — Crédit : <strong>${fmtEUR(credit)}</strong> ${eq ? '✓ équilibrée' : '⚠ déséquilibrée'}`;
+    }
+    const lignesWrap = document.getElementById('ql-lignes');
+    lignesWrap.appendChild(ligneRow()); lignesWrap.appendChild(ligneRow());
+    document.getElementById('ql-add-ligne').addEventListener('click', ()=> lignesWrap.appendChild(ligneRow()));
+    updateTotaux();
+    document.getElementById('ql-submit').addEventListener('click', ()=>{
+      const date = document.getElementById('ql-date').value;
+      const journal = document.getElementById('ql-journal').value;
+      const piece = document.getElementById('ql-piece').value.trim();
+      const libelle = document.getElementById('ql-libelle').value.trim();
+      if(!date || !libelle){ notify('Date et libellé requis.', true); return; }
+      const lignes = Array.from(document.querySelectorAll('#ql-lignes .free-entry-row')).map(r=>({
+        compte: r.querySelector('.ql-compte').value,
+        libelle: r.querySelector('.ql-lib').value.trim(),
+        debit: Number(r.querySelector('.ql-debit').value)||0,
+        credit: Number(r.querySelector('.ql-credit').value)||0
+      })).filter(l=> l.debit>0 || l.credit>0);
+      try{
+        addEcriture({ date, journal, piece, libelle, lignes });
+        logActivity(`Écriture libre : ${libelle}`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Écriture enregistrée.');
+      }catch(err){ notify(err.message, true); }
+    });
+  }
+
+  document.getElementById('qa-encaisser-loyers').addEventListener('click', genererEncaissementsLoyers);
+
+  document.getElementById('qa-apport-cc').addEventListener('click', ()=>{
+    openComptaModal(`
+      <h3 style="margin-top:0">Apport en compte courant</h3>
+      <div class="field-row">
+        <div><label>Associé</label><select id="qcc-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name}</option>`).join('')}</select></div>
+        <div><label>Date</label><input type="date" id="qcc-date" value="${todayISO()}"></div>
+        <div><label>Montant (€)</label><input type="number" step="0.01" id="qcc-montant"></div>
+      </div>
+      <div class="btn-row"><button class="btn" id="qcc-submit">Enregistrer l'apport</button></div>
+    `);
+    document.getElementById('qcc-submit').addEventListener('click', ()=>{
+      const sel = document.getElementById('qcc-associe');
+      const date = document.getElementById('qcc-date').value;
+      const montant = Number(document.getElementById('qcc-montant').value);
+      if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
+      const libelle = `Apport compte courant — ${sel.selectedOptions[0].dataset.name}`;
+      try{
+        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'512000', debit:montant, libelle }, { compte:'455000', credit:montant, libelle, compAuxNum:sel.value, compAuxLib:sel.selectedOptions[0].dataset.name } ] });
+        logActivity(libelle + ` (${fmtEUR(montant)})`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Apport enregistré.');
+      }catch(err){ notify(err.message, true); }
+    });
+  });
+  document.getElementById('qa-remb-cc').addEventListener('click', ()=>{
+    openComptaModal(`
+      <h3 style="margin-top:0">Remboursement de compte courant</h3>
+      <div class="field-row">
+        <div><label>Associé</label><select id="qrc-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name} (solde : ${fmtEUR(ccAssocieSolde(a.id))})</option>`).join('')}</select></div>
+        <div><label>Date</label><input type="date" id="qrc-date" value="${todayISO()}"></div>
+        <div><label>Montant (€)</label><input type="number" step="0.01" id="qrc-montant"></div>
+      </div>
+      <div class="btn-row"><button class="btn" id="qrc-submit">Enregistrer le remboursement</button></div>
+    `);
+    document.getElementById('qrc-submit').addEventListener('click', ()=>{
+      const sel = document.getElementById('qrc-associe');
+      const date = document.getElementById('qrc-date').value;
+      const montant = Number(document.getElementById('qrc-montant').value);
+      if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
+      const libelle = `Remboursement compte courant — ${sel.selectedOptions[0].dataset.name}`;
+      try{
+        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'455000', debit:montant, libelle, compAuxNum:sel.value, compAuxLib:sel.selectedOptions[0].dataset.name }, { compte:'512000', credit:montant, libelle } ] });
+        logActivity(libelle + ` (${fmtEUR(montant)})`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Remboursement enregistré.');
+      }catch(err){ notify(err.message, true); }
+    });
+  });
+
+  document.getElementById('qa-distribuer').addEventListener('click', ()=>{
+    const bilanYear = document.getElementById('bilan-year');
+    const year = (bilanYear && bilanYear.value) || String(new Date().getFullYear());
+    const bilan = computeBilan(year);
+    openComptaModal(`
+      <h3 style="margin-top:0">Voter une distribution de dividende</h3>
+      <p class="helper">Résultat cumulé disponible au 31/12/${year} (réserves + résultats non distribués) : <strong>${fmtEUR(bilan.passif.resultatCumule)}</strong>.</p>
+      <div class="field-row">
+        <div><label>Date de la décision</label><input type="date" id="qd-date" value="${todayISO()}"></div>
+        <div><label>Montant total à distribuer (€)</label><input type="number" step="0.01" id="qd-montant"></div>
+      </div>
+      <div id="qd-repartition"></div>
+      <div class="btn-row"><button class="btn" id="qd-submit">Enregistrer la distribution</button></div>
+    `);
+    function renderRepartition(){
+      const montant = Number(document.getElementById('qd-montant').value)||0;
+      const totalPart = (DATA.associes||[]).reduce((s,a)=>s+Number(a.part||0),0)||100;
+      document.getElementById('qd-repartition').innerHTML = `<table class="compact"><thead><tr><th>Associé</th><th>Part</th><th class="num-col">Montant</th></tr></thead><tbody>
+        ${(DATA.associes||[]).map(a=>`<tr><td>${a.name}</td><td>${a.part}%</td><td class="num-col">${fmtEUR(montant*Number(a.part||0)/totalPart)}</td></tr>`).join('')}
+      </tbody></table>`;
+    }
+    document.getElementById('qd-montant').addEventListener('input', renderRepartition);
+    renderRepartition();
+    document.getElementById('qd-submit').addEventListener('click', ()=>{
+      const date = document.getElementById('qd-date').value;
+      const montant = Number(document.getElementById('qd-montant').value);
+      if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
+      const totalPart = (DATA.associes||[]).reduce((s,a)=>s+Number(a.part||0),0)||100;
+      const libelle = `Distribution de dividende votée le ${fmtDate(date)}`;
+      const lignes = [ { compte:'110000', debit:montant, libelle } ];
+      (DATA.associes||[]).forEach(a=>{
+        const part = montant*Number(a.part||0)/totalPart;
+        if(part>0) lignes.push({ compte:'457000', credit:part, libelle:`Dividende voté — ${a.name}`, compAuxNum:a.id, compAuxLib:a.name });
+      });
+      try{
+        addEcriture({ date, journal:'OD', libelle, lignes });
+        logActivity(libelle + ` (${fmtEUR(montant)})`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Distribution enregistrée.');
+      }catch(err){ notify(err.message, true); }
+    });
+  });
+  document.getElementById('qa-verser-dividende').addEventListener('click', ()=>{
+    openComptaModal(`
+      <h3 style="margin-top:0">Verser un dividende voté</h3>
+      <div class="field-row">
+        <div><label>Associé</label><select id="qvd-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name} (dû : ${fmtEUR(dividendeDuAssocie(a.id))})</option>`).join('')}</select></div>
+        <div><label>Date</label><input type="date" id="qvd-date" value="${todayISO()}"></div>
+        <div><label>Montant (€)</label><input type="number" step="0.01" id="qvd-montant"></div>
+      </div>
+      <div class="btn-row"><button class="btn" id="qvd-submit">Enregistrer le versement</button></div>
+    `);
+    document.getElementById('qvd-submit').addEventListener('click', ()=>{
+      const sel = document.getElementById('qvd-associe');
+      const date = document.getElementById('qvd-date').value;
+      const montant = Number(document.getElementById('qvd-montant').value);
+      if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
+      const libelle = `Versement dividende — ${sel.selectedOptions[0].dataset.name}`;
+      try{
+        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'457000', debit:montant, libelle, compAuxNum:sel.value, compAuxLib:sel.selectedOptions[0].dataset.name }, { compte:'512000', credit:montant, libelle } ] });
+        logActivity(libelle + ` (${fmtEUR(montant)})`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Versement enregistré.');
+      }catch(err){ notify(err.message, true); }
+    });
+  });
+
+  // ---------- IMMOBILISATIONS : formulaire ----------
+  document.getElementById('addImmoBtn').addEventListener('click', ()=> openImmoModal());
+  window.__editImmo = function(id){ openImmoModal(ensureCompta().immobilisations.find(i=>i.id===id)); };
+  window.__removeImmo = async function(id){
+    const c = ensureCompta();
+    if(!(await confirmDialog("Supprimer cette immobilisation ? Les écritures d'amortissement déjà générées resteront dans le journal."))) return;
+    c.immobilisations = c.immobilisations.filter(i=>i.id!==id);
+    logActivity('Immobilisation supprimée');
+    saveData(); renderAll();
+  };
+  function openImmoModal(existing){
+    openComptaModal(`
+      <h3 style="margin-top:0">${existing ? 'Modifier' : 'Ajouter'} une immobilisation</h3>
+      <div class="field-row">
+        <div><label>Libellé</label><input id="qi-libelle" value="${existing ? existing.libelle : ''}" placeholder="Ex : Immeuble 12 rue…"></div>
+        <div><label>Composant</label><select id="qi-type">
+          <option value="construction" ${existing && existing.compte==='213000' ? 'selected':''}>Construction</option>
+          <option value="agencement" ${existing && existing.compte==='218100' ? 'selected':''}>Agencement / installation</option>
+        </select></div>
+      </div>
+      <div class="field-row">
+        <div><label>Date d'acquisition</label><input type="date" id="qi-date-acq" value="${existing ? existing.dateAcquisition : todayISO()}"></div>
+        <div><label>Date de mise en service</label><input type="date" id="qi-date-service" value="${existing ? (existing.dateMiseEnService||existing.dateAcquisition) : todayISO()}"></div>
+      </div>
+      <div class="field-row">
+        <div><label>Valeur du terrain (non amortissable, € — 0 si aucun)</label><input type="number" step="0.01" id="qi-terrain" value="${existing ? existing.valeurTerrain||0 : 0}"></div>
+        <div><label>Valeur amortissable (construction/agencement, €)</label><input type="number" step="0.01" id="qi-amortissable" value="${existing ? existing.valeurAmortissable||'' : ''}"></div>
+      </div>
+      <div class="field-row">
+        <div><label>Durée d'amortissement (années)</label><input type="number" id="qi-duree" value="${existing ? existing.dureeAns : 25}"></div>
+        ${!existing ? `<div><label>Financement initial</label><select id="qi-financement"><option value="512000">Banque</option><option value="164000">Emprunt (montant total financé par emprunt)</option><option value="none">Ne pas générer d'écriture (déjà enregistré)</option></select></div>` : ''}
+      </div>
+      <p class="compta-note">Durées usuelles : 20 à 30 ans pour une construction, 8 à 15 ans pour des agencements. Le terrain n'est jamais amorti.</p>
+      <div class="btn-row"><button class="btn" id="qi-submit">Enregistrer</button></div>
+    `);
+    document.getElementById('qi-submit').addEventListener('click', ()=>{
+      const libelle = document.getElementById('qi-libelle').value.trim();
+      const type = document.getElementById('qi-type').value;
+      const dateAcquisition = document.getElementById('qi-date-acq').value;
+      const dateMiseEnService = document.getElementById('qi-date-service').value || dateAcquisition;
+      const valeurTerrain = Number(document.getElementById('qi-terrain').value)||0;
+      const valeurAmortissable = Number(document.getElementById('qi-amortissable').value)||0;
+      const dureeAns = Number(document.getElementById('qi-duree').value)||25;
+      if(!libelle || !dateAcquisition || valeurAmortissable<=0){ notify('Libellé, date et valeur amortissable requis.', true); return; }
+      const compte = type==='construction' ? '213000' : '218100';
+      const c = ensureCompta();
+      if(existing){
+        Object.assign(existing, { libelle, compte, dateAcquisition, dateMiseEnService, valeurTerrain, valeurAmortissable, dureeAns });
+        logActivity(`Immobilisation modifiée : ${libelle}`);
+      } else {
+        const immo = { id: uid('immo'), libelle, compte, dateAcquisition, dateMiseEnService, valeurTerrain, valeurAmortissable, dureeAns, cedeLe:null };
+        c.immobilisations.push(immo);
+        const financement = document.getElementById('qi-financement').value;
+        if(financement !== 'none'){
+          try{
+            const lignes = [];
+            if(valeurTerrain>0) lignes.push({ compte:'211000', debit:valeurTerrain, libelle:`Acquisition terrain — ${libelle}` });
+            lignes.push({ compte, debit:valeurAmortissable, libelle:`Acquisition — ${libelle}` });
+            lignes.push({ compte:financement, credit:valeurTerrain+valeurAmortissable, libelle:`Financement acquisition — ${libelle}` });
+            addEcriture({ date:dateAcquisition, journal:'IM', libelle:`Acquisition — ${libelle}`, lignes, source:'immobilisation', sourceId:immo.id });
+          }catch(err){ notify(err.message, true); }
+        }
+        logActivity(`Immobilisation ajoutée : ${libelle}`);
+      }
+      saveData(); renderAll(); closeComptaModal();
+    });
+  }
+
+  document.getElementById('genererAmortBtn').addEventListener('click', ()=>{
+    const year = document.getElementById('amort-year').value;
+    try{
+      const n = genererDotationsExercice(year);
+      if(n>0){ logActivity(`${n} dotation(s) aux amortissements ${year} enregistrée(s)`); saveData(); renderAll(); }
+      notify(n>0 ? `${n} dotation(s) aux amortissements enregistrée(s) pour ${year}.` : `Aucune nouvelle dotation à enregistrer pour ${year}.`);
+    }catch(err){ notify(err.message, true); }
+  });
+  document.getElementById('amort-year').addEventListener('change', renderImmos);
+
+  // ---------- FACTURES (travaux, rénovation…) ----------
+  function readFileAsBase64(file){
+    return new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = ()=> resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadFactureFile(factureId, file){
+    if(file.size > 20_000_000) throw new Error('Fichier trop volumineux (limite ~20 Mo).');
+    const base64 = await readFileAsBase64(file);
+    const mimeType = file.type || 'application/octet-stream';
+    const uploaded = await api('api/attachments', {
+      method: 'POST',
+      body: JSON.stringify({ leaseId: factureId, name: file.name, mimeType, base64 })
+    });
+    return { id: uploaded.id, name: file.name, mimeType, uploadedAt: uploaded.uploadedAt };
+  }
+
+  document.getElementById('addFactureBtn').addEventListener('click', ()=> openFactureModal());
+  function openFactureModal(){
+    openComptaModal(`
+      <h3 style="margin-top:0">Ajouter une facture</h3>
+      <div class="field-row">
+        <div><label>Date de la facture</label><input type="date" id="qf-date" value="${todayISO()}"></div>
+        <div><label>Fournisseur / artisan</label><input id="qf-fournisseur" placeholder="Ex : Entreprise Dupont"></div>
+      </div>
+      <div class="field-row"><div><label>Objet</label><input id="qf-objet" placeholder="Ex : Réfection toiture"></div></div>
+      <div class="field-row">
+        <div><label>Montant (€ TTC)</label><input type="number" step="0.01" id="qf-montant"></div>
+        <div><label>Nature</label><select id="qf-nature">
+          <option value="charge">Charge déductible (entretien, réparation courante)</option>
+          <option value="immobilisation">Immobilisation (amélioration, agrandissement, reconstruction)</option>
+        </select></div>
+      </div>
+      <div id="qf-nature-fields"></div>
+      <div class="field-row"><div><label>Justificatif (PDF, photo…)</label><input type="file" id="qf-file"></div></div>
+      <p class="compta-note">Une réparation qui remet en état existant est une charge déductible immédiatement. Des travaux qui améliorent, agrandissent ou prolongent significativement la durée de vie du bien doivent être immobilisés et amortis. En cas de doute, demande à ton expert-comptable.</p>
+      <div class="btn-row"><button class="btn" id="qf-submit">Enregistrer la facture</button></div>
+    `);
+    function renderNatureFields(){
+      const nature = document.getElementById('qf-nature').value;
+      document.getElementById('qf-nature-fields').innerHTML = nature==='charge' ? `
+        <div class="field-row">
+          <div><label>Compte de charge</label><select id="qf-compte">${COMPTES_CHARGE.map(c=>`<option value="${c.compte}" ${c.compte==='615000'?'selected':''}>${c.libelle}</option>`).join('')}</select></div>
+          <div><label>Réglé par</label><select id="qf-mode">
+            <option value="banque">Banque (déjà payé)</option>
+            <option value="fournisseur">Fournisseur (à payer plus tard)</option>
+            <option value="cc">Associé sur ses fonds propres (compte courant)</option>
+          </select></div>
+          <div id="qf-associe-wrap" style="display:none;"><label>Associé</label><select id="qf-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name}</option>`).join('')}</select></div>
+        </div>
+      ` : `
+        <div class="field-row">
+          <div><label>Composant</label><select id="qf-immo-type"><option value="construction">Construction</option><option value="agencement">Agencement / installation</option></select></div>
+          <div><label>Durée d'amortissement (années)</label><input type="number" id="qf-immo-duree" value="15"></div>
+          <div><label>Date de mise en service</label><input type="date" id="qf-immo-service" value="${todayISO()}"></div>
+        </div>
+        <div class="field-row">
+          <div><label>Financement</label><select id="qf-immo-financement">
+            <option value="512000">Banque</option>
+            <option value="164000">Emprunt</option>
+            <option value="404000">Fournisseur d'immobilisations (à payer plus tard)</option>
+          </select></div>
+        </div>
+      `;
+      if(nature==='charge'){
+        document.getElementById('qf-mode').addEventListener('change', (e)=>{
+          document.getElementById('qf-associe-wrap').style.display = e.target.value==='cc' ? 'block' : 'none';
+        });
+      }
+    }
+    renderNatureFields();
+    document.getElementById('qf-nature').addEventListener('change', renderNatureFields);
+
+    document.getElementById('qf-submit').addEventListener('click', async ()=>{
+      const date = document.getElementById('qf-date').value;
+      const fournisseur = document.getElementById('qf-fournisseur').value.trim();
+      const objet = document.getElementById('qf-objet').value.trim();
+      const montant = Number(document.getElementById('qf-montant').value);
+      const nature = document.getElementById('qf-nature').value;
+      const file = document.getElementById('qf-file').files[0];
+      if(!date || !montant || montant<=0 || !objet){ notify('Date, objet et montant valides requis.', true); return; }
+      const libelle = `${objet}${fournisseur?' — '+fournisseur:''}`;
+      const facture = { id: uid('facture'), date, fournisseur, objet, montant, nature, ecritureId:null, immobilisationId:null, attachments:[], createdAt:new Date().toISOString(), createdBy:getWhoAmI()||'' };
+      try{
+        if(nature==='charge'){
+          const compte = document.getElementById('qf-compte').value;
+          const mode = document.getElementById('qf-mode').value;
+          const contrepartie = mode==='banque' ? { compte:'512000', credit:montant }
+            : mode==='fournisseur' ? { compte:'401000', credit:montant, libelle }
+            : (()=>{ const sel=document.getElementById('qf-associe'); return { compte:'455000', credit:montant, compAuxNum:sel.value, compAuxLib: sel.selectedOptions[0].dataset.name }; })();
+          const ecr = addEcriture({ date, journal: mode==='banque'?'BQ':'AC', libelle, lignes:[ { compte, debit:montant, libelle }, contrepartie ] });
+          facture.ecritureId = ecr.id;
+        } else {
+          const type = document.getElementById('qf-immo-type').value;
+          const dureeAns = Number(document.getElementById('qf-immo-duree').value)||15;
+          const dateMiseEnService = document.getElementById('qf-immo-service').value || date;
+          const financement = document.getElementById('qf-immo-financement').value;
+          const compte = type==='construction' ? '213000' : '218100';
+          const c = ensureCompta();
+          const immo = { id: uid('immo'), libelle, compte, dateAcquisition:date, dateMiseEnService, valeurTerrain:0, valeurAmortissable:montant, dureeAns, cedeLe:null };
+          c.immobilisations.push(immo);
+          const ecr = addEcriture({ date, journal:'IM', libelle:`Acquisition — ${libelle}`, lignes:[ { compte, debit:montant, libelle }, { compte:financement, credit:montant, libelle } ], source:'immobilisation', sourceId:immo.id });
+          facture.ecritureId = ecr.id;
+          facture.immobilisationId = immo.id;
+        }
+        if(file){
+          const att = await uploadFactureFile(facture.id, file);
+          facture.attachments.push(att);
+        }
+        ensureCompta().factures.push(facture);
+        logActivity(`Facture ajoutée : ${libelle} (${fmtEUR(montant)})`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Facture enregistrée.');
+      }catch(err){ notify(err.message, true); }
+    });
+  }
+
+  window.__deleteFacture = async function(id){
+    const c = ensureCompta();
+    const facture = c.factures.find(f=>f.id===id);
+    if(!facture) return;
+    if(!(await confirmDialog(`Supprimer la facture "${facture.objet}" ? L'écriture comptable et les pièces jointes associées ne seront pas automatiquement supprimées.`))) return;
+    c.factures = c.factures.filter(f=>f.id!==id);
+    logActivity(`Facture supprimée : ${facture.objet}`);
+    saveData(); renderAll();
+  };
+
+  window.__uploadFactureAttachment = async function(factureId){
+    const input = document.getElementById(`factureFileInput-${factureId}`);
+    const file = input.files[0];
+    if(!file){ notify('Choisis d\'abord un fichier.', true); return; }
+    try{
+      const att = await uploadFactureFile(factureId, file);
+      const facture = ensureCompta().factures.find(f=>f.id===factureId);
+      facture.attachments.push(att);
+      logActivity(`Pièce jointe ajoutée à la facture : ${facture.objet}`);
+      saveData(); renderAll();
+      notify('✓ Pièce jointe ajoutée.');
+    }catch(err){ notify(err.message, true); }
+  };
+
+  window.__deleteFactureAttachment = async function(factureId, fileId){
+    if(!(await confirmDialog('Supprimer cette pièce jointe ?'))) return;
+    const facture = ensureCompta().factures.find(f=>f.id===factureId);
+    if(facture) facture.attachments = facture.attachments.filter(a=>a.id!==fileId);
+    saveData(); renderAll();
+    try{ await api('api/attachments/' + fileId, { method: 'DELETE' }); }catch(e){ /* pièce déjà absente, sans conséquence */ }
+  };
+
+  // ---------- CLÔTURE D'EXERCICE ----------
+  window.__cloturerExercice = async function(year){
+    const cr = computeCompteResultat(year);
+    if(!(await confirmDialog(`Clôturer l'exercice ${year} ? Résultat comptable : ${fmtEUR(cr.resultat)}. Les écritures datées dans cet exercice ne pourront plus être modifiées sans le rouvrir.`))) return;
+    setExerciceMeta(year, { cloture:true, dateCloture: dateClotureExercice(year) });
+    logActivity(`Exercice ${year} clôturé (résultat : ${fmtEUR(cr.resultat)})`);
+    saveData(); renderAll();
+  };
+  window.__rouvrirExercice = async function(year){
+    if(!(await confirmDialog(`Rouvrir l'exercice ${year} ? Ses écritures redeviendront modifiables.`))) return;
+    setExerciceMeta(year, { cloture:false });
+    logActivity(`Exercice ${year} rouvert`);
+    saveData(); renderAll();
+  };
+
+  // ---------- ÉCRITURES : suppression ----------
+  window.__deleteEcriture = async function(id){
+    if(!(await confirmDialog('Supprimer cette écriture ?'))) return;
+    try{
+      deleteEcriture(id);
+      logActivity('Écriture supprimée');
+      saveData(); renderAll();
+    }catch(err){ notify(err.message, true); }
+  };
+
+  // ---------- EXPORTS CSV ----------
+  function downloadCsv(filename, rows){
+    const csv = rows.map(r=> r.map(v=> String(v).replace(/;/g,',')).join(';')).join('\n');
+    const blob = new Blob(['\ufeff'+csv], { type:'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+  document.getElementById('exportGrandLivreBtn').addEventListener('click', ()=>{
+    const year = document.getElementById('gl-year').value;
+    const c = ensureCompta();
+    const rows = [['Compte','Libellé','Date','Journal','Pièce','Écriture','Libellé écriture','Débit','Crédit']];
+    c.ecritures.filter(e=>e.exercice===year).sort((a,b)=> a.date.localeCompare(b.date) || a.num-b.num).forEach(e=>{
+      e.lignes.forEach(l=> rows.push([l.compte, compteDef(l.compte).libelle, e.date, e.journal, e.piece, e.num, l.libelle, l.debit.toFixed(2), l.credit.toFixed(2)]));
+    });
+    downloadCsv(`grand-livre-${year}.csv`, rows);
+    logActivity(`Export grand livre ${year}`); saveData();
+  });
+  document.getElementById('exportBalanceBtn').addEventListener('click', ()=>{
+    const year = document.getElementById('gl-year').value;
+    const bal = computeBalance({ dateDebut: dateDebutExercice(year), dateFin: dateClotureExercice(year) });
+    const rows = [['Compte','Libellé','Débit','Crédit','Solde']];
+    bal.forEach(b=> rows.push([b.compte, b.libelle, b.debit.toFixed(2), b.credit.toFixed(2), b.solde.toFixed(2)]));
+    downloadCsv(`balance-${year}.csv`, rows);
+    logActivity(`Export balance ${year}`); saveData();
+  });
+  document.getElementById('exportBilanCsvBtn').addEventListener('click', ()=>{
+    const year = document.getElementById('bilan-year').value;
+    const b = computeBilan(year);
+    const rows = [
+      ['ACTIF','Montant','PASSIF','Montant'],
+      ['Immobilisations nettes', b.actif.immoNet.toFixed(2), 'Capital', b.passif.capital.toFixed(2)],
+      ['Clients', b.actif.clients.toFixed(2), 'Emprunts', b.passif.emprunts.toFixed(2)],
+      ['TVA déductible', b.actif.tvaDeductible.toFixed(2), 'Fournisseurs', b.passif.fournisseurs.toFixed(2)],
+      ['Banque', b.actif.banque.toFixed(2), 'IS à payer', b.passif.isAPayer.toFixed(2)],
+      ['', '', 'Comptes courants associés', b.passif.ccAssocies.toFixed(2)],
+      ['', '', 'Dividendes à payer', b.passif.dividendesAPayer.toFixed(2)],
+      ['', '', 'Résultat cumulé', b.passif.resultatCumule.toFixed(2)],
+      ['TOTAL ACTIF', b.actif.total.toFixed(2), 'TOTAL PASSIF', b.passif.total.toFixed(2)]
+    ];
+    downloadCsv(`bilan-${year}.csv`, rows);
+    logActivity(`Export bilan ${year}`); saveData();
+  });
+  document.getElementById('exportResultatCsvBtn').addEventListener('click', ()=>{
+    const year = document.getElementById('resultat-year').value;
+    const cr = computeCompteResultat(year);
+    const rows = [['Type','Compte','Libellé','Montant']];
+    cr.produitsDetail.forEach(p=> rows.push(['Produit', p.compte, p.libelle, p.montant.toFixed(2)]));
+    cr.chargesDetail.forEach(c2=> rows.push(['Charge', c2.compte, c2.libelle, c2.montant.toFixed(2)]));
+    rows.push(['TOTAL PRODUITS','','', cr.totalProduits.toFixed(2)]);
+    rows.push(['TOTAL CHARGES','','', cr.totalCharges.toFixed(2)]);
+    rows.push(['RÉSULTAT','','', cr.resultat.toFixed(2)]);
+    downloadCsv(`compte-resultat-${year}.csv`, rows);
+    logActivity(`Export compte de résultat ${year}`); saveData();
+  });
+
+  // ---------- FEC ----------
+  function fecDate(d){ return d.replace(/-/g,''); }
+  document.getElementById('exportFecBtn').addEventListener('click', ()=>{
+    const year = document.getElementById('fec-year').value;
+    const c = ensureCompta();
+    const meta = getExerciceMeta(year);
+    const siren = (DATA.sci.siret||'').replace(/\D/g,'').slice(0,9);
+    if(siren.length !== 9){ notify("SIRET/SIREN incomplet : renseignez-le dans l'onglet SCI avant d'exporter le FEC.", true); return; }
+    if(!meta.cloture){ notify(`L'exercice ${year} doit être clôturé avant l'export FEC (onglet Export & FEC).`, true); return; }
+    const ecritures = c.ecritures.filter(e=>e.exercice===year).sort((a,b)=> a.date.localeCompare(b.date) || a.num-b.num);
+    const header = ['JournalCode','JournalLib','EcritureNum','EcritureDate','CompteNum','CompteLib','CompAuxNum','CompAuxLib','PieceRef','PieceDate','EcritureLib','Debit','Credit','EcritureLet','DateLet','ValidDate','Montantdevise','Idevise'];
+    const lines = [header.join('\t')];
+    ecritures.forEach(e=>{
+      e.lignes.forEach(l=>{
+        lines.push([
+          e.journal, JOURNAUX[e.journal]||e.journal, e.num, fecDate(e.date),
+          l.compte, compteDef(l.compte).libelle, l.compAuxNum||'', l.compAuxLib||'',
+          e.piece, fecDate(e.date), (l.libelle||e.libelle).replace(/\t/g,' '),
+          l.debit.toFixed(2), l.credit.toFixed(2), '', '', fecDate(meta.dateCloture), '', ''
+        ].join('\t'));
+      });
+    });
+    const blob = new Blob([lines.join('\r\n')], { type:'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download = `${siren}FEC${fecDate(meta.dateCloture)}.txt`; a.click();
+    URL.revokeObjectURL(url);
+    logActivity(`Export FEC ${year}`); saveData();
+  });
+
+  // ---------- RENDER ----------
+  function renderComptaSubnav(){
+    document.querySelectorAll('#comptaSubnav button').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        document.querySelectorAll('#comptaSubnav button').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.compta-sub').forEach(v=>v.classList.remove('active'));
+        document.getElementById('compta-'+btn.dataset.sub).classList.add('active');
+      });
+    });
+  }
+  let comptaSubnavWired = false;
+
+  function renderComptaBoard(){
+    populateYearSelect('compta-year');
+    const year = document.getElementById('compta-year').value;
+    const cr = computeCompteResultat(year);
+    const bilan = computeBilan(year);
+    const isCalc = calculIS(year);
+    const kpis = document.getElementById('comptaKpis');
+    kpis.innerHTML = `
+      <div class="kpi-card ${cr.resultat>=0?'positive':'negative'}"><div class="kpi-label">Résultat comptable ${year}</div><div class="kpi-value">${fmtEUR(cr.resultat)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Trésorerie (banque + caisse)</div><div class="kpi-value">${fmtEUR(bilan.actif.banque)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">IS estimé ${year}</div><div class="kpi-value">${fmtEUR(isCalc.is)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Comptes courants associés</div><div class="kpi-value">${fmtEUR(bilan.passif.ccAssocies)}</div></div>
+    `;
+    document.getElementById('comptaBoardResultat').innerHTML = `
+      <table class="compact"><tbody>
+        <tr><td>Total produits</td><td class="num-col">${fmtEUR(cr.totalProduits)}</td></tr>
+        <tr><td>Total charges</td><td class="num-col">${fmtEUR(cr.totalCharges)}</td></tr>
+        <tr class="bilan-total-row"><td>Résultat de l'exercice</td><td class="num-col">${fmtEUR(cr.resultat)}</td></tr>
+      </tbody></table>`;
+  }
+
+  function renderEcritures(){
+    populateYearSelect('ecritures-year');
+    populateYearSelect('amort-year');
+    const year = document.getElementById('ecritures-year').value;
+    const c = ensureCompta();
+    const list = c.ecritures.filter(e=>e.exercice===year).sort((a,b)=> b.date.localeCompare(a.date) || b.num-a.num);
+    const wrap = document.getElementById('ecrituresList');
+    const cloture = getExerciceMeta(year).cloture;
+    if(list.length===0){ wrap.innerHTML = '<div class="empty">Aucune écriture pour cet exercice.</div>'; return; }
+    wrap.innerHTML = list.map(e=> `
+      <div class="ecriture-block">
+        <div class="ecriture-head">
+          <span>#${e.num} · ${fmtDate(e.date)} · ${e.journal} · ${e.piece}</span>
+          <span>${e.libelle}</span>
+          ${!cloture ? `<button class="btn danger small" onclick="window.__deleteEcriture('${e.id}')">Supprimer</button>` : '<span class="badge cloture">Clôturé</span>'}
+        </div>
+        <table class="compact ecriture-lignes"><tbody>
+          ${e.lignes.map(l=>`<tr><td>${l.compte} — ${compteDef(l.compte).libelle}${l.compAuxLib?' ('+l.compAuxLib+')':''}</td><td class="num-col">${l.debit?fmtEUR(l.debit):''}</td><td class="num-col">${l.credit?fmtEUR(l.credit):''}</td></tr>`).join('')}
+        </tbody></table>
+      </div>
+    `).join('');
+  }
+
+  function renderImmos(){
+    populateYearSelect('amort-year');
+    const c = ensureCompta();
+    const wrap = document.getElementById('immosList');
+    if(c.immobilisations.length===0){ wrap.innerHTML = '<div class="empty">Aucune immobilisation enregistrée.</div>'; }
+    else {
+      wrap.innerHTML = `<table class="compact"><thead><tr><th>Libellé</th><th>Composant</th><th class="num-col">Terrain</th><th class="num-col">Amortissable</th><th>Durée</th><th></th></tr></thead><tbody>
+        ${c.immobilisations.map(i=>`<tr>
+          <td>${i.libelle}</td><td>${i.compte==='213000'?'Construction':'Agencement'}</td>
+          <td class="num-col">${fmtEUR(i.valeurTerrain||0)}</td><td class="num-col">${fmtEUR(i.valeurAmortissable)}</td><td>${i.dureeAns} ans</td>
+          <td><button class="btn secondary small" onclick="window.__editImmo('${i.id}')">Modifier</button> <button class="btn danger small" onclick="window.__removeImmo('${i.id}')">Suppr.</button></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+    }
+    const year = document.getElementById('amort-year').value;
+    const preview = document.getElementById('amortPreview');
+    if(c.immobilisations.length===0){ preview.innerHTML=''; return; }
+    const dejaGenere = new Set(c.ecritures.filter(e=>e.source==='amortissement').map(e=>e.sourceId));
+    preview.innerHTML = `<table class="compact"><thead><tr><th>Immobilisation</th><th class="num-col">Dotation ${year}</th><th>Statut</th></tr></thead><tbody>
+      ${c.immobilisations.map(i=>{
+        const montant = calculDotationAmortissement(i, year);
+        const fait = dejaGenere.has(`${i.id}:${year}`);
+        return `<tr><td>${i.libelle}</td><td class="num-col">${fmtEUR(montant)}</td><td>${fait?'✓ enregistrée':(montant>0?'à générer':'—')}</td></tr>`;
+      }).join('')}
+    </tbody></table>`;
+  }
+
+  function renderFactures(){
+    const wrap = document.getElementById('facturesList');
+    if(!wrap) return;
+    const c = ensureCompta();
+    const factures = [...c.factures].sort((a,b)=> b.date.localeCompare(a.date));
+    if(factures.length===0){ wrap.innerHTML = '<div class="empty">Aucune facture enregistrée pour l\'instant.</div>'; return; }
+    wrap.innerHTML = factures.map(f=> `
+      <div class="ecriture-block">
+        <div class="ecriture-head">
+          <span>${fmtDate(f.date)} · ${f.fournisseur || 'Fournisseur non renseigné'}</span>
+          <span>${f.objet} — ${fmtEUR(f.montant)}</span>
+          <span class="badge ${f.nature==='immobilisation'?'cloture':'ouvert'}">${f.nature==='immobilisation'?'Immobilisée':'Charge'}</span>
+          <button class="btn danger small" onclick="window.__deleteFacture('${f.id}')">Supprimer</button>
+        </div>
+        <div style="padding:12px;">
+          ${f.attachments.length===0 ? '<div class="empty">Aucun justificatif joint.</div>' : `<table class="compact"><tbody>
+            ${f.attachments.map(a=>`<tr><td>${a.name}</td><td>${fmtDate(a.uploadedAt.slice(0,10))}</td><td>
+              <button class="btn secondary small" onclick="window.__downloadAttachment('${f.id}','${a.id}')">Télécharger</button>
+              <button class="btn danger small" onclick="window.__deleteFactureAttachment('${f.id}','${a.id}')">Supprimer</button>
+            </td></tr>`).join('')}
+          </tbody></table>`}
+          <div class="btn-row" style="margin-top:8px;">
+            <input type="file" id="factureFileInput-${f.id}">
+            <button class="btn secondary small" onclick="window.__uploadFactureAttachment('${f.id}')">Ajouter un justificatif</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function renderAssociesComptes(){
+    const wrap = document.getElementById('ccAssociesList');
+    if(wrap){
+      wrap.innerHTML = `<table class="compact"><thead><tr><th>Associé</th><th class="num-col">Solde compte courant</th></tr></thead><tbody>
+        ${(DATA.associes||[]).map(a=>`<tr><td>${a.name}</td><td class="num-col">${fmtEUR(ccAssocieSolde(a.id))}</td></tr>`).join('')}
+      </tbody></table>`;
+    }
+    const divWrap = document.getElementById('dividendesList');
+    if(divWrap){
+      divWrap.innerHTML = `<table class="compact"><thead><tr><th>Associé</th><th class="num-col">Dividende dû (non versé)</th></tr></thead><tbody>
+        ${(DATA.associes||[]).map(a=>`<tr><td>${a.name}</td><td class="num-col">${fmtEUR(dividendeDuAssocie(a.id))}</td></tr>`).join('')}
+      </tbody></table>`;
+    }
+  }
+
+  function renderBilan(){
+    populateYearSelect('bilan-year');
+    const year = document.getElementById('bilan-year').value;
+    const b = computeBilan(year);
+    document.getElementById('bilanWrap').innerHTML = `
+      <p class="section-sub">Au 31/12/${year}</p>
+      <div class="bilan-cols">
+        <div class="panel">
+          <div class="panel-title">Actif</div>
+          <table class="compact"><tbody>
+            <tr><td>Terrains</td><td class="num-col">${fmtEUR(b.actif.terrains)}</td></tr>
+            <tr><td>Constructions et agencements (brut)</td><td class="num-col">${fmtEUR(b.actif.constructionsBrut)}</td></tr>
+            <tr><td>− Amortissements cumulés</td><td class="num-col">− ${fmtEUR(b.actif.amortissementsCumules)}</td></tr>
+            <tr><td><strong>Immobilisations nettes</strong></td><td class="num-col"><strong>${fmtEUR(b.actif.immoNet)}</strong></td></tr>
+            <tr><td>Clients</td><td class="num-col">${fmtEUR(b.actif.clients)}</td></tr>
+            <tr><td>TVA déductible</td><td class="num-col">${fmtEUR(b.actif.tvaDeductible)}</td></tr>
+            <tr><td>Banque et caisse</td><td class="num-col">${fmtEUR(b.actif.banque)}</td></tr>
+            <tr class="bilan-total-row"><td>Total actif</td><td class="num-col">${fmtEUR(b.actif.total)}</td></tr>
+          </tbody></table>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Passif</div>
+          <table class="compact"><tbody>
+            <tr><td>Capital social et réserves</td><td class="num-col">${fmtEUR(b.passif.capital)}</td></tr>
+            <tr><td>Résultat cumulé (report à nouveau + résultats)</td><td class="num-col">${fmtEUR(b.passif.resultatCumule)}</td></tr>
+            <tr><td>Emprunts</td><td class="num-col">${fmtEUR(b.passif.emprunts)}</td></tr>
+            <tr><td>Fournisseurs</td><td class="num-col">${fmtEUR(b.passif.fournisseurs)}</td></tr>
+            <tr><td>État — IS à payer</td><td class="num-col">${fmtEUR(b.passif.isAPayer)}</td></tr>
+            <tr><td>Comptes courants associés</td><td class="num-col">${fmtEUR(b.passif.ccAssocies)}</td></tr>
+            <tr><td>Dividendes à payer</td><td class="num-col">${fmtEUR(b.passif.dividendesAPayer)}</td></tr>
+            <tr class="bilan-total-row"><td>Total passif</td><td class="num-col">${fmtEUR(b.passif.total)}</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+      ${Math.abs(b.actif.total-b.passif.total)>0.01 ? `<p class="compta-note">⚠ Écart actif/passif de ${fmtEUR(b.actif.total-b.passif.total)} — vérifiez les écritures libres.</p>` : ''}
+    `;
+  }
+
+  function renderResultat(){
+    populateYearSelect('resultat-year');
+    const year = document.getElementById('resultat-year').value;
+    const cr = computeCompteResultat(year);
+    document.getElementById('resultatWrap').innerHTML = `
+      <p class="section-sub">Exercice du ${fmtDate(cr.dateDebut)} au ${fmtDate(cr.dateFin)}</p>
+      <div class="panel">
+        <div class="panel-title">Produits</div>
+        <table class="compact"><tbody>
+          ${cr.produitsDetail.map(p=>`<tr><td>${p.compte} — ${p.libelle}</td><td class="num-col">${fmtEUR(p.montant)}</td></tr>`).join('') || '<tr><td class="empty">Aucun produit</td></tr>'}
+          <tr class="bilan-total-row"><td>Total produits</td><td class="num-col">${fmtEUR(cr.totalProduits)}</td></tr>
+        </tbody></table>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Charges</div>
+        <table class="compact"><tbody>
+          ${cr.chargesDetail.map(c=>`<tr><td>${c.compte} — ${c.libelle}</td><td class="num-col">${fmtEUR(c.montant)}</td></tr>`).join('') || '<tr><td class="empty">Aucune charge</td></tr>'}
+          <tr class="bilan-total-row"><td>Total charges</td><td class="num-col">${fmtEUR(cr.totalCharges)}</td></tr>
+        </tbody></table>
+      </div>
+      <div class="kpi-card ${cr.resultat>=0?'positive':'negative'}"><div class="kpi-label">Résultat de l'exercice</div><div class="kpi-value">${fmtEUR(cr.resultat)}</div></div>
+    `;
+  }
+
+  function renderIS(){
+    populateYearSelect('is-year');
+    const year = document.getElementById('is-year').value;
+    const meta = getExerciceMeta(year);
+    const calc = calculIS(year);
+    const ech = echeancesIS(year);
+    document.getElementById('isWrap').innerHTML = `
+      <div class="panel">
+        <div class="panel-title">Calcul de l'impôt sur les sociétés</div>
+        <div class="field-row">
+          <div><label>Ajustement fiscal (réintégrations − déductions, €)</label><input type="number" step="0.01" id="is-ajustement" value="${meta.ajustementFiscal||0}"></div>
+          <div><label>Déficit antérieur à imputer cette année (€, disponible : ${fmtEUR(calc.deficitDisponible)})</label><input type="number" step="0.01" id="is-deficit" value="${meta.deficitImputeManuel||0}"></div>
+        </div>
+        <div class="field-row">
+          <div><label><input type="checkbox" id="is-taux-reduit" ${meta.tauxReduitEligible!==false?'checked':''}> Éligible au taux réduit de 15%</label>
+            <p class="helper">CA HT &lt; 10 M€, capital entièrement libéré, détenu à 75% au moins par des personnes physiques.</p>
+          </div>
+        </div>
+        <div class="btn-row"><button class="btn secondary small" id="is-save">Enregistrer ces paramètres</button></div>
+        <table class="compact" style="margin-top:14px;"><tbody>
+          <tr><td>Résultat comptable</td><td class="num-col">${fmtEUR(calc.resultatComptable)}</td></tr>
+          <tr><td>Résultat fiscal avant imputation des déficits</td><td class="num-col">${fmtEUR(calc.resultatFiscalAvantDeficit)}</td></tr>
+          <tr><td>Déficit antérieur imputé</td><td class="num-col">− ${fmtEUR(calc.deficitImpute)}</td></tr>
+          <tr><td><strong>Résultat imposable</strong></td><td class="num-col"><strong>${fmtEUR(calc.resultatImposable)}</strong></td></tr>
+          <tr><td>Dont taxé à ${calc.tauxReduit*100}%</td><td class="num-col">${fmtEUR(calc.baseReduite)}</td></tr>
+          <tr><td>Dont taxé à ${calc.tauxNormal*100}%</td><td class="num-col">${fmtEUR(calc.baseNormale)}</td></tr>
+          <tr class="bilan-total-row"><td>IS dû</td><td class="num-col">${fmtEUR(calc.is)}</td></tr>
+        </tbody></table>
+        <div class="btn-row" style="margin-top:10px;"><button class="btn secondary small" id="is-comptabiliser">Comptabiliser la charge d'IS</button></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Échéancier fiscal</div>
+        <table class="compact"><tbody>
+          <tr><td>Clôture de l'exercice</td><td class="num-col">${fmtDate(ech.dateFin)}</td></tr>
+          <tr><td>Déclaration de résultat (n°2065) et solde de l'IS (n°2572)</td><td class="num-col">${fmtDate(ech.declaration)}</td></tr>
+          ${ech.acomptesDus ? ech.acomptes.map(a=>`<tr><td>Acompte d'IS (n°2571)</td><td class="num-col">${fmtDate(a.date)} — ${fmtEUR(a.montant)}</td></tr>`).join('') : `<tr><td>Acomptes d'IS</td><td class="num-col">Non dus (IS N-1 ≤ 3 000 €)</td></tr>`}
+        </tbody></table>
+        <p class="compta-note">Dates indicatives calculées à partir de la clôture (délai de 3 mois pour la déclaration ; échéances trimestrielles classiques pour les acomptes sur exercice civil). La date exacte de dépôt pour un exercice clos au 31/12 est fixée chaque année par la DGFiP (généralement mi-mai). Vérifiez toujours ces échéances avec votre expert-comptable ou sur impots.gouv.fr — cet outil est une aide, pas une déclaration officielle.</p>
+      </div>
+    `;
+    document.getElementById('is-save').addEventListener('click', ()=>{
+      setExerciceMeta(year, {
+        ajustementFiscal: Number(document.getElementById('is-ajustement').value)||0,
+        deficitImputeManuel: Number(document.getElementById('is-deficit').value)||0,
+        tauxReduitEligible: document.getElementById('is-taux-reduit').checked
+      });
+      logActivity(`Paramètres IS ${year} mis à jour`);
+      saveData(); renderAll();
+    });
+    document.getElementById('is-comptabiliser').addEventListener('click', ()=>{
+      const c = ensureCompta();
+      const sourceId = `is:${year}`;
+      if(c.ecritures.some(e=>e.sourceId===sourceId)){ notify(`La charge d'IS ${year} est déjà comptabilisée.`, true); return; }
+      if(calc.is<=0){ notify('IS nul : rien à comptabiliser.', true); return; }
+      try{
+        addEcriture({ date: dateClotureExercice(year), journal:'OD', piece:'IS-'+year, libelle:`Impôt sur les sociétés ${year}`,
+          lignes: [ { compte:'695000', debit:calc.is }, { compte:'444000', credit:calc.is } ], source:'is', sourceId });
+        logActivity(`Charge d'IS ${year} comptabilisée (${fmtEUR(calc.is)})`);
+        saveData(); renderAll();
+      }catch(err){ notify(err.message, true); }
+    });
+  }
+
+  function renderExportPanel(){
+    populateYearSelect('gl-year');
+    populateYearSelect('fec-year');
+    populateYearSelect('cloture-year');
+    const year = document.getElementById('cloture-year').value;
+    const meta = getExerciceMeta(year);
+    const cr = computeCompteResultat(year);
+    document.getElementById('clotureWrap').innerHTML = `
+      <p>Statut : ${meta.cloture ? `<span class="badge cloture">Clôturé le ${fmtDate(meta.dateCloture)}</span>` : '<span class="badge ouvert">Ouvert</span>'}</p>
+      <p>Résultat comptable de l'exercice : <strong>${fmtEUR(cr.resultat)}</strong></p>
+      <div class="btn-row">
+        ${meta.cloture
+          ? `<button class="btn secondary small" onclick="window.__rouvrirExercice('${year}')">Rouvrir l'exercice</button>`
+          : `<button class="btn small" onclick="window.__cloturerExercice('${year}')">Clôturer l'exercice ${year}</button>`}
+      </div>
+    `;
+  }
+  document.getElementById('cloture-year').addEventListener('change', renderExportPanel);
+  document.getElementById('compta-year').addEventListener('change', renderComptaBoard);
+  document.getElementById('ecritures-year').addEventListener('change', renderEcritures);
+  document.getElementById('bilan-year').addEventListener('change', renderBilan);
+  document.getElementById('resultat-year').addEventListener('change', renderResultat);
+  document.getElementById('is-year').addEventListener('change', renderIS);
+
+  function renderComptabilite(){
+    ensureCompta();
+    if(!comptaSubnavWired){ renderComptaSubnav(); comptaSubnavWired = true; }
+    renderComptaBoard();
+    renderEcritures();
+    renderImmos();
+    renderFactures();
+    renderAssociesComptes();
+    renderBilan();
+    renderResultat();
+    renderIS();
+    renderExportPanel();
   }
 
   function renderAll(){
@@ -2734,6 +4346,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     renderEmailLog();
     renderModeNotice();
     renderAccounting();
+    renderComptabilite();
     renderActivityLog();
     renderOverdueList();
     renderAccountPanel();
