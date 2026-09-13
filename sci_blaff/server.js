@@ -109,7 +109,8 @@ if (!dataRow) {
     emailLog: [],
     bailTemplate: '',
     associes: [],
-    activityLog: []
+    activityLog: [],
+    compta: { planComptable: [], ecritures: [], immobilisations: [], factures: [], exercices: {}, nextEcritureNum: 1, reglages: {} }
   };
   db.prepare('INSERT INTO app_data (id, json, updated_at, updated_by) VALUES (1, ?, ?, ?)')
     .run(JSON.stringify(defaultData), new Date().toISOString(), 'system');
@@ -175,7 +176,7 @@ setInterval(() => {
 // App Express
 // ---------------------------------------------------------------------------
 const app = express();
-app.use(express.json({ limit: '30mb' })); // marge pour les pièces jointes en base64 (jusqu'à ~20 Mo de fichier)
+app.use(express.json({ limit: '150mb' })); // marge pour les pièces jointes en base64 et la restauration complète d'une sauvegarde
 
 // --- Auth ---
 app.post('/api/auth/login', (req, res) => {
@@ -332,6 +333,39 @@ app.get('/api/export-full', requireAuthOrExportKey, async (req, res) => {
   } catch (err) {
     console.error('[export-full] erreur:', err);
     res.status(500).json({ error: 'Échec de la génération de l\'export.' });
+  }
+});
+
+// Restauration complète depuis une sauvegarde (données + pièces jointes) : le
+// fichier .zip est décompressé côté navigateur (l'add-on n'a pas besoin d'une
+// dépendance de décompression), qui envoie ici le JSON des données et la liste
+// des pièces jointes reconstituées. Remplace tout en une transaction, pour ne
+// jamais laisser la base dans un état à moitié restauré. Ne touche ni aux
+// comptes utilisateurs ni aux sessions : on reste connecté après restauration.
+app.post('/api/restore-full', requireAuth, (req, res) => {
+  const { data, attachments } = req.body || {};
+  if (!data || typeof data !== 'object' || !Array.isArray(data.apartments)) {
+    return res.status(400).json({ error: "Fichier de sauvegarde invalide (donnees.json manquant ou incorrect)." });
+  }
+  if (!Array.isArray(attachments)) {
+    return res.status(400).json({ error: 'Liste des pièces jointes invalide.' });
+  }
+  try {
+    const restore = db.transaction(() => {
+      db.prepare('UPDATE app_data SET json = ?, updated_at = ?, updated_by = ? WHERE id = 1')
+        .run(JSON.stringify(data), new Date().toISOString(), req.user.email);
+      db.prepare('DELETE FROM attachments').run();
+      const insert = db.prepare('INSERT INTO attachments (id, lease_id, name, mime_type, base64, uploaded_at) VALUES (?,?,?,?,?,?)');
+      for (const a of attachments) {
+        if (!a || !a.id || !a.leaseId || !a.name || !a.base64) continue;
+        insert.run(a.id, a.leaseId, a.name, a.mimeType || 'application/octet-stream', a.base64, a.uploadedAt || new Date().toISOString());
+      }
+    });
+    restore();
+    res.json({ ok: true, attachmentsRestored: attachments.length });
+  } catch (err) {
+    console.error('[restore-full] erreur:', err);
+    res.status(500).json({ error: 'Échec de la restauration : ' + err.message });
   }
 });
 

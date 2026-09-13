@@ -15,6 +15,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- JSZip embarqué localement (pas de dépendance externe pour la restauration de sauvegarde) -->
+<script src="vendor/jszip.min.js"></script>
 <style>
   :root{
     --ink:#152845;
@@ -581,6 +583,7 @@
       <button data-sub="board" class="active">Tableau de bord</button>
       <button data-sub="ecritures">Écritures</button>
       <button data-sub="immos">Immobilisations</button>
+      <button data-sub="factures">Factures</button>
       <button data-sub="assoc">Associés &amp; comptes courants</button>
       <button data-sub="bilan">Bilan</button>
       <button data-sub="resultat">Résultat</button>
@@ -645,6 +648,19 @@
         <div class="field-row"><div><label>Exercice</label><select id="amort-year"></select></div></div>
         <div id="amortPreview"></div>
         <div class="btn-row"><button class="btn" id="genererAmortBtn">Calculer et enregistrer les dotations de l'exercice</button></div>
+      </div>
+    </div>
+
+    <!-- FACTURES -->
+    <div class="compta-sub" id="compta-factures">
+      <div class="panel">
+        <div class="panel-title">Ajouter une facture (travaux, rénovation, achats…)</div>
+        <p class="helper" style="margin-bottom:12px;">Garde le justificatif scanné avec la facture — tout est inclus dans la sauvegarde complète. L'écriture comptable correspondante est générée automatiquement.</p>
+        <div class="btn-row"><button class="btn small" id="addFactureBtn">+ Ajouter une facture</button></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Registre des factures</div>
+        <div id="facturesList"></div>
       </div>
     </div>
 
@@ -848,7 +864,17 @@
         <button class="btn secondary" id="backupDriveNowBtn">Sauvegarder maintenant sur Google Drive</button>
         <span class="helper" id="backupActionMsg" style="align-self:center;"></span>
       </div>
-      <p class="helper" style="margin-top:8px;">Une sauvegarde automatique s'envoie aussi chaque nuit vers Google Drive, uniquement si des données ont changé depuis la veille.</p>
+      <p class="helper" style="margin-top:8px;">Une sauvegarde automatique s'envoie aussi chaque nuit vers Google Drive, uniquement si des données ont changé depuis la veille. Cette sauvegarde inclut TOUS les fichiers ajoutés dans l'app (pièces jointes des baux, factures de travaux…).</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Restaurer une sauvegarde complète</div>
+      <p class="helper" style="margin-bottom:10px;">⚠ Remplace <strong>toutes</strong> les données et pièces jointes actuelles par celles du fichier .zip choisi (baux, quittances, comptabilité, factures…). Les comptes de connexion ne sont pas touchés — tu restes connecté. Utilise un fichier téléchargé avec le bouton ci-dessus, ou récupéré depuis Google Drive.</p>
+      <div class="btn-row">
+        <input type="file" id="restoreFileInput" accept=".zip" style="display:none;">
+        <button class="btn danger" id="restoreFullBtn">Choisir un fichier .zip et restaurer…</button>
+        <span class="helper" id="restoreStatusMsg" style="align-self:center;"></span>
+      </div>
     </div>
   </section>
 
@@ -873,7 +899,7 @@
 <!-- Modal de confirmation générique (remplace window.confirm, bloqué dans le cadre Ingress) -->
 <div class="modal-bg" id="confirmModalBg">
   <div class="modal" style="max-width:420px;">
-    <p id="confirmModalMessage" style="margin:0 0 20px; line-height:1.5;"></p>
+    <p id="confirmModalMessage" style="margin:0 0 20px; line-height:1.5; white-space:pre-line;"></p>
     <div class="btn-row" style="justify-content:flex-end;">
       <button class="btn secondary" id="confirmModalCancel">Annuler</button>
       <button class="btn danger" id="confirmModalOk">Confirmer</button>
@@ -964,7 +990,7 @@
     const token = getToken();
     const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
     if(token) headers['Authorization'] = 'Bearer ' + token;
-    const res = await fetch(API_BASE + path, Object.assign({}, options, { headers }));
+    const res = await fetch(API_BASE + path, Object.assign({ cache: 'no-store' }, options, { headers }));
     if(res.status === 401){
       clearToken();
       showLoginScreen('Session expirée — reconnecte-toi.');
@@ -2884,6 +2910,84 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     }
   });
 
+  // --- Restauration complète depuis un fichier .zip (données + pièces jointes) ---
+  function uint8ArrayToBase64(bytes){
+    let binary = '';
+    const chunkSize = 0x8000;
+    for(let i=0; i<bytes.length; i+=chunkSize){
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i+chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  document.getElementById('restoreFullBtn').addEventListener('click', ()=>{
+    document.getElementById('restoreFileInput').click();
+  });
+
+  document.getElementById('restoreFileInput').addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    e.target.value = '';
+    if(!file) return;
+    const statusEl = document.getElementById('restoreStatusMsg');
+    statusEl.style.color = '';
+    statusEl.textContent = 'Lecture du fichier…';
+    try{
+      const buffer = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(buffer);
+      const donneesFile = zip.file('donnees.json');
+      if(!donneesFile) throw new Error("Ce fichier ne contient pas de donnees.json — ce n'est pas une sauvegarde valide de cette application.");
+      const restoredData = JSON.parse(await donneesFile.async('string'));
+      if(!restoredData || !Array.isArray(restoredData.apartments)) throw new Error('Le contenu de donnees.json est invalide.');
+
+      const manifestFile = zip.file('pieces-jointes/manifeste.json');
+      const manifest = manifestFile ? JSON.parse(await manifestFile.async('string')) : [];
+
+      statusEl.textContent = `Lecture de ${manifest.length} pièce(s) jointe(s)…`;
+      const attachments = [];
+      for(const entry of manifest){
+        const safeName = `${entry.leaseId}__${entry.name}`.replace(/[/\\]/g, '_');
+        const zipEntry = zip.file('pieces-jointes/' + safeName);
+        if(!zipEntry) continue; // pièce jointe manquante dans l'archive : ignorée, le reste se restaure quand même
+        const bytes = await zipEntry.async('uint8array');
+        attachments.push({ id: entry.id, leaseId: entry.leaseId, name: entry.name, mimeType: entry.mimeType, uploadedAt: entry.uploadedAt, base64: uint8ArrayToBase64(bytes) });
+      }
+
+      const resume = [
+        `Baux : ${(restoredData.leases||[]).length}`,
+        `Quittances : ${(restoredData.quittances||[]).length}`,
+        `Écritures comptables : ${((restoredData.compta||{}).ecritures||[]).length}`,
+        `Pièces jointes : ${attachments.length}`
+      ].join('\n');
+      statusEl.textContent = '';
+      if(!(await confirmDialog(`Restaurer cette sauvegarde va remplacer TOUTES les données actuelles par :\n\n${resume}\n\nCette action est irréversible (sauf à restaurer une autre sauvegarde ensuite). Continuer ?`))) return;
+
+      statusEl.textContent = 'Restauration en cours…';
+      const result = await api('api/restore-full', { method: 'POST', body: JSON.stringify({ data: restoredData, attachments }) });
+      statusEl.textContent = '';
+      // Remplacement complet (pas de fusion) : fetchRemoteData() fusionne avec l'existant
+      // via Object.assign, ce qui est voulu pour la synchronisation normale (préserve les
+      // sections encore absentes du serveur lors d'une migration) mais est faux ici — une
+      // restauration doit effacer entièrement l'état précédent, y compris les sections
+      // qu'une sauvegarde plus ancienne ne contient pas encore.
+      applyingRemoteUpdate = true;
+      try{
+        const freshBody = await api('api/data');
+        DATA = freshBody.data;
+        ensureCompta();
+        logActivity('Sauvegarde complète restaurée depuis ' + file.name);
+        renderAll();
+      } finally {
+        applyingRemoteUpdate = false;
+      }
+      saveData();
+      notify(`✓ Sauvegarde restaurée (${result.attachmentsRestored} pièce(s) jointe(s)).`);
+    }catch(err){
+      statusEl.style.color = 'var(--brick-dark)';
+      statusEl.textContent = '';
+      notify('⚠ Échec de la restauration : ' + (err && err.message || err), true);
+    }
+  });
+
   function renderModeNotice(){
     const wrap = document.getElementById('modeNotice');
     if(!wrap) return;
@@ -2940,6 +3044,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     if(!Array.isArray(c.planComptable) || !c.planComptable.length) c.planComptable = JSON.parse(JSON.stringify(PLAN_COMPTABLE_DEFAULT));
     if(!Array.isArray(c.ecritures)) c.ecritures = [];
     if(!Array.isArray(c.immobilisations)) c.immobilisations = [];
+    if(!Array.isArray(c.factures)) c.factures = [];
     if(!c.exercices || typeof c.exercices !== 'object') c.exercices = {};
     if(typeof c.nextEcritureNum !== 'number') c.nextEcritureNum = 1;
     if(!c.reglages || typeof c.reglages !== 'object') c.reglages = {};
@@ -3677,6 +3782,159 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   });
   document.getElementById('amort-year').addEventListener('change', renderImmos);
 
+  // ---------- FACTURES (travaux, rénovation…) ----------
+  function readFileAsBase64(file){
+    return new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = ()=> resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadFactureFile(factureId, file){
+    if(file.size > 20_000_000) throw new Error('Fichier trop volumineux (limite ~20 Mo).');
+    const base64 = await readFileAsBase64(file);
+    const mimeType = file.type || 'application/octet-stream';
+    const uploaded = await api('api/attachments', {
+      method: 'POST',
+      body: JSON.stringify({ leaseId: factureId, name: file.name, mimeType, base64 })
+    });
+    return { id: uploaded.id, name: file.name, mimeType, uploadedAt: uploaded.uploadedAt };
+  }
+
+  document.getElementById('addFactureBtn').addEventListener('click', ()=> openFactureModal());
+  function openFactureModal(){
+    openComptaModal(`
+      <h3 style="margin-top:0">Ajouter une facture</h3>
+      <div class="field-row">
+        <div><label>Date de la facture</label><input type="date" id="qf-date" value="${todayISO()}"></div>
+        <div><label>Fournisseur / artisan</label><input id="qf-fournisseur" placeholder="Ex : Entreprise Dupont"></div>
+      </div>
+      <div class="field-row"><div><label>Objet</label><input id="qf-objet" placeholder="Ex : Réfection toiture"></div></div>
+      <div class="field-row">
+        <div><label>Montant (€ TTC)</label><input type="number" step="0.01" id="qf-montant"></div>
+        <div><label>Nature</label><select id="qf-nature">
+          <option value="charge">Charge déductible (entretien, réparation courante)</option>
+          <option value="immobilisation">Immobilisation (amélioration, agrandissement, reconstruction)</option>
+        </select></div>
+      </div>
+      <div id="qf-nature-fields"></div>
+      <div class="field-row"><div><label>Justificatif (PDF, photo…)</label><input type="file" id="qf-file"></div></div>
+      <p class="compta-note">Une réparation qui remet en état existant est une charge déductible immédiatement. Des travaux qui améliorent, agrandissent ou prolongent significativement la durée de vie du bien doivent être immobilisés et amortis. En cas de doute, demande à ton expert-comptable.</p>
+      <div class="btn-row"><button class="btn" id="qf-submit">Enregistrer la facture</button></div>
+    `);
+    function renderNatureFields(){
+      const nature = document.getElementById('qf-nature').value;
+      document.getElementById('qf-nature-fields').innerHTML = nature==='charge' ? `
+        <div class="field-row">
+          <div><label>Compte de charge</label><select id="qf-compte">${COMPTES_CHARGE.map(c=>`<option value="${c.compte}" ${c.compte==='615000'?'selected':''}>${c.libelle}</option>`).join('')}</select></div>
+          <div><label>Réglé par</label><select id="qf-mode">
+            <option value="banque">Banque (déjà payé)</option>
+            <option value="fournisseur">Fournisseur (à payer plus tard)</option>
+            <option value="cc">Associé sur ses fonds propres (compte courant)</option>
+          </select></div>
+          <div id="qf-associe-wrap" style="display:none;"><label>Associé</label><select id="qf-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name}</option>`).join('')}</select></div>
+        </div>
+      ` : `
+        <div class="field-row">
+          <div><label>Composant</label><select id="qf-immo-type"><option value="construction">Construction</option><option value="agencement">Agencement / installation</option></select></div>
+          <div><label>Durée d'amortissement (années)</label><input type="number" id="qf-immo-duree" value="15"></div>
+          <div><label>Date de mise en service</label><input type="date" id="qf-immo-service" value="${todayISO()}"></div>
+        </div>
+        <div class="field-row">
+          <div><label>Financement</label><select id="qf-immo-financement">
+            <option value="512000">Banque</option>
+            <option value="164000">Emprunt</option>
+            <option value="404000">Fournisseur d'immobilisations (à payer plus tard)</option>
+          </select></div>
+        </div>
+      `;
+      if(nature==='charge'){
+        document.getElementById('qf-mode').addEventListener('change', (e)=>{
+          document.getElementById('qf-associe-wrap').style.display = e.target.value==='cc' ? 'block' : 'none';
+        });
+      }
+    }
+    renderNatureFields();
+    document.getElementById('qf-nature').addEventListener('change', renderNatureFields);
+
+    document.getElementById('qf-submit').addEventListener('click', async ()=>{
+      const date = document.getElementById('qf-date').value;
+      const fournisseur = document.getElementById('qf-fournisseur').value.trim();
+      const objet = document.getElementById('qf-objet').value.trim();
+      const montant = Number(document.getElementById('qf-montant').value);
+      const nature = document.getElementById('qf-nature').value;
+      const file = document.getElementById('qf-file').files[0];
+      if(!date || !montant || montant<=0 || !objet){ notify('Date, objet et montant valides requis.', true); return; }
+      const libelle = `${objet}${fournisseur?' — '+fournisseur:''}`;
+      const facture = { id: uid('facture'), date, fournisseur, objet, montant, nature, ecritureId:null, immobilisationId:null, attachments:[], createdAt:new Date().toISOString(), createdBy:getWhoAmI()||'' };
+      try{
+        if(nature==='charge'){
+          const compte = document.getElementById('qf-compte').value;
+          const mode = document.getElementById('qf-mode').value;
+          const contrepartie = mode==='banque' ? { compte:'512000', credit:montant }
+            : mode==='fournisseur' ? { compte:'401000', credit:montant, libelle }
+            : (()=>{ const sel=document.getElementById('qf-associe'); return { compte:'455000', credit:montant, compAuxNum:sel.value, compAuxLib: sel.selectedOptions[0].dataset.name }; })();
+          const ecr = addEcriture({ date, journal: mode==='banque'?'BQ':'AC', libelle, lignes:[ { compte, debit:montant, libelle }, contrepartie ] });
+          facture.ecritureId = ecr.id;
+        } else {
+          const type = document.getElementById('qf-immo-type').value;
+          const dureeAns = Number(document.getElementById('qf-immo-duree').value)||15;
+          const dateMiseEnService = document.getElementById('qf-immo-service').value || date;
+          const financement = document.getElementById('qf-immo-financement').value;
+          const compte = type==='construction' ? '213000' : '218100';
+          const c = ensureCompta();
+          const immo = { id: uid('immo'), libelle, compte, dateAcquisition:date, dateMiseEnService, valeurTerrain:0, valeurAmortissable:montant, dureeAns, cedeLe:null };
+          c.immobilisations.push(immo);
+          const ecr = addEcriture({ date, journal:'IM', libelle:`Acquisition — ${libelle}`, lignes:[ { compte, debit:montant, libelle }, { compte:financement, credit:montant, libelle } ], source:'immobilisation', sourceId:immo.id });
+          facture.ecritureId = ecr.id;
+          facture.immobilisationId = immo.id;
+        }
+        if(file){
+          const att = await uploadFactureFile(facture.id, file);
+          facture.attachments.push(att);
+        }
+        ensureCompta().factures.push(facture);
+        logActivity(`Facture ajoutée : ${libelle} (${fmtEUR(montant)})`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Facture enregistrée.');
+      }catch(err){ notify(err.message, true); }
+    });
+  }
+
+  window.__deleteFacture = async function(id){
+    const c = ensureCompta();
+    const facture = c.factures.find(f=>f.id===id);
+    if(!facture) return;
+    if(!(await confirmDialog(`Supprimer la facture "${facture.objet}" ? L'écriture comptable et les pièces jointes associées ne seront pas automatiquement supprimées.`))) return;
+    c.factures = c.factures.filter(f=>f.id!==id);
+    logActivity(`Facture supprimée : ${facture.objet}`);
+    saveData(); renderAll();
+  };
+
+  window.__uploadFactureAttachment = async function(factureId){
+    const input = document.getElementById(`factureFileInput-${factureId}`);
+    const file = input.files[0];
+    if(!file){ notify('Choisis d\'abord un fichier.', true); return; }
+    try{
+      const att = await uploadFactureFile(factureId, file);
+      const facture = ensureCompta().factures.find(f=>f.id===factureId);
+      facture.attachments.push(att);
+      logActivity(`Pièce jointe ajoutée à la facture : ${facture.objet}`);
+      saveData(); renderAll();
+      notify('✓ Pièce jointe ajoutée.');
+    }catch(err){ notify(err.message, true); }
+  };
+
+  window.__deleteFactureAttachment = async function(factureId, fileId){
+    if(!(await confirmDialog('Supprimer cette pièce jointe ?'))) return;
+    const facture = ensureCompta().factures.find(f=>f.id===factureId);
+    if(facture) facture.attachments = facture.attachments.filter(a=>a.id!==fileId);
+    saveData(); renderAll();
+    try{ await api('api/attachments/' + fileId, { method: 'DELETE' }); }catch(e){ /* pièce déjà absente, sans conséquence */ }
+  };
+
   // ---------- CLÔTURE D'EXERCICE ----------
   window.__cloturerExercice = async function(year){
     const cr = computeCompteResultat(year);
@@ -3871,6 +4129,36 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     </tbody></table>`;
   }
 
+  function renderFactures(){
+    const wrap = document.getElementById('facturesList');
+    if(!wrap) return;
+    const c = ensureCompta();
+    const factures = [...c.factures].sort((a,b)=> b.date.localeCompare(a.date));
+    if(factures.length===0){ wrap.innerHTML = '<div class="empty">Aucune facture enregistrée pour l\'instant.</div>'; return; }
+    wrap.innerHTML = factures.map(f=> `
+      <div class="ecriture-block">
+        <div class="ecriture-head">
+          <span>${fmtDate(f.date)} · ${f.fournisseur || 'Fournisseur non renseigné'}</span>
+          <span>${f.objet} — ${fmtEUR(f.montant)}</span>
+          <span class="badge ${f.nature==='immobilisation'?'cloture':'ouvert'}">${f.nature==='immobilisation'?'Immobilisée':'Charge'}</span>
+          <button class="btn danger small" onclick="window.__deleteFacture('${f.id}')">Supprimer</button>
+        </div>
+        <div style="padding:12px;">
+          ${f.attachments.length===0 ? '<div class="empty">Aucun justificatif joint.</div>' : `<table class="compact"><tbody>
+            ${f.attachments.map(a=>`<tr><td>${a.name}</td><td>${fmtDate(a.uploadedAt.slice(0,10))}</td><td>
+              <button class="btn secondary small" onclick="window.__downloadAttachment('${f.id}','${a.id}')">Télécharger</button>
+              <button class="btn danger small" onclick="window.__deleteFactureAttachment('${f.id}','${a.id}')">Supprimer</button>
+            </td></tr>`).join('')}
+          </tbody></table>`}
+          <div class="btn-row" style="margin-top:8px;">
+            <input type="file" id="factureFileInput-${f.id}">
+            <button class="btn secondary small" onclick="window.__uploadFactureAttachment('${f.id}')">Ajouter un justificatif</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
   function renderAssociesComptes(){
     const wrap = document.getElementById('ccAssociesList');
     if(wrap){
@@ -4041,6 +4329,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     renderComptaBoard();
     renderEcritures();
     renderImmos();
+    renderFactures();
     renderAssociesComptes();
     renderBilan();
     renderResultat();
