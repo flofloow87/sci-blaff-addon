@@ -110,7 +110,7 @@ if (!dataRow) {
     bailTemplate: '',
     associes: [],
     activityLog: [],
-    compta: { planComptable: [], ecritures: [], immobilisations: [], factures: [], exercices: {}, nextEcritureNum: 1, reglages: {} }
+    compta: { planComptable: [], ecritures: [], immobilisations: [], factures: [], decisions: [], exercices: {}, nextEcritureNum: 1, reglages: {} }
   };
   db.prepare('INSERT INTO app_data (id, json, updated_at, updated_by) VALUES (1, ?, ?, ?)')
     .run(JSON.stringify(defaultData), new Date().toISOString(), 'system');
