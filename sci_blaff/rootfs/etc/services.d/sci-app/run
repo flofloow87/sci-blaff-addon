@@ -12,6 +12,11 @@ GOOGLE_CLIENT_ID=$(bashio::config 'google_client_id')
 GOOGLE_CLIENT_SECRET=$(bashio::config 'google_client_secret')
 GOOGLE_DRIVE_FOLDER_ID=$(bashio::config 'google_drive_folder_id')
 ANTHROPIC_API_KEY=$(bashio::config 'anthropic_api_key')
+SMTP_HOST=$(bashio::config 'smtp_host')
+SMTP_PORT=$(bashio::config 'smtp_port')
+SMTP_USER=$(bashio::config 'smtp_user')
+SMTP_PASSWORD=$(bashio::config 'smtp_password')
+SMTP_FROM=$(bashio::config 'smtp_from')
 
 if bashio::config.is_empty 'admin_email' || bashio::config.is_empty 'admin_password'; then
     bashio::log.warning "Options 'admin_email' / 'admin_password' non renseignées."
@@ -29,6 +34,11 @@ export GOOGLE_CLIENT_ID
 export GOOGLE_CLIENT_SECRET
 export GOOGLE_DRIVE_FOLDER_ID
 export ANTHROPIC_API_KEY
+export SMTP_HOST
+export SMTP_PORT
+export SMTP_USER
+export SMTP_PASSWORD
+export SMTP_FROM
 
 bashio::log.info "Démarrage du serveur SCI BLAFF sur le port interne 3000…"
 cd /app || bashio::exit.nok "Impossible d'accéder à /app"
