@@ -4119,10 +4119,12 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         </select></div>
       </div>
       <div id="qf-nature-fields"></div>
-      <div class="field-row"><div><label>Justificatif (PDF, photo…)</label><input type="file" id="qf-file"></div></div>
+      <div class="field-row"><div><label>Justificatif (PDF, photo…)</label><input type="file" id="qf-file" accept="application/pdf,image/*"></div></div>
+      <p class="helper" id="qf-extract-status"></p>
       <p class="compta-note">Une réparation qui remet en état existant est une charge déductible immédiatement. Des travaux qui améliorent, agrandissent ou prolongent significativement la durée de vie du bien doivent être immobilisés et amortis. En cas de doute, demande à ton expert-comptable.</p>
       <div class="btn-row"><button class="btn" id="qf-submit">Enregistrer la facture</button></div>
     `);
+    document.getElementById('qf-file').addEventListener('change', extraireFactureAuto);
     function renderNatureFields(){
       const nature = document.getElementById('qf-nature').value;
       document.getElementById('qf-nature-fields').innerHTML = nature==='charge' ? `
@@ -4157,6 +4159,36 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     }
     renderNatureFields();
     document.getElementById('qf-nature').addEventListener('change', renderNatureFields);
+
+    async function extraireFactureAuto(){
+      const file = document.getElementById('qf-file').files[0];
+      const statusEl = document.getElementById('qf-extract-status');
+      if(!file) return;
+      const supported = file.type === 'application/pdf' || file.type.startsWith('image/');
+      if(!supported){ statusEl.textContent = ''; return; }
+      statusEl.style.color = '';
+      statusEl.textContent = '🤖 Lecture automatique de la facture en cours…';
+      try{
+        const base64 = await readFileAsBase64(file);
+        const result = await api('api/extract-facture', { method:'POST', body: JSON.stringify({ base64, mimeType: file.type }) });
+        const ex = result.extracted || {};
+        const dateEl = document.getElementById('qf-date');
+        const fournisseurEl = document.getElementById('qf-fournisseur');
+        const objetEl = document.getElementById('qf-objet');
+        const montantEl = document.getElementById('qf-montant');
+        const natureEl = document.getElementById('qf-nature');
+        if(ex.date && /^\d{4}-\d{2}-\d{2}$/.test(ex.date)) dateEl.value = ex.date;
+        if(ex.fournisseur && !fournisseurEl.value.trim()) fournisseurEl.value = ex.fournisseur;
+        if(ex.objet && !objetEl.value.trim()) objetEl.value = ex.objet;
+        if(ex.montant && !montantEl.value) montantEl.value = ex.montant;
+        if(ex.nature==='charge' || ex.nature==='immobilisation'){ natureEl.value = ex.nature; renderNatureFields(); }
+        statusEl.style.color = '';
+        statusEl.textContent = '✓ Champs pré-remplis automatiquement — vérifie avant d\'enregistrer.';
+      }catch(err){
+        statusEl.style.color = 'var(--brick-dark)';
+        statusEl.textContent = "⚠ Lecture automatique indisponible (" + (err && err.message || err) + ") — remplis les champs manuellement.";
+      }
+    }
 
     document.getElementById('qf-submit').addEventListener('click', async ()=>{
       const date = document.getElementById('qf-date').value;

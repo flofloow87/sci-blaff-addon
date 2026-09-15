@@ -278,6 +278,63 @@ app.delete('/api/attachments/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Lecture automatique de factures (IA) ---
+// Envoie le fichier (image ou PDF) à l'API Claude pour en extraire les champs
+// (fournisseur, date, montant, objet, nature) et pré-remplir le formulaire côté
+// client. Nécessite l'option "anthropic_api_key" ; sans elle, la route répond
+// 503 et l'utilisateur remplit le formulaire à la main comme avant.
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+let anthropicClient = null;
+if (ANTHROPIC_API_KEY) {
+  const Anthropic = require('@anthropic-ai/sdk');
+  anthropicClient = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+}
+
+const FACTURE_EXTRACTION_PROMPT = `Tu analyses une facture pour une SCI française. Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ni après, sans balises markdown, au format exact suivant :
+{
+  "fournisseur": string ou null,
+  "date": string au format AAAA-MM-JJ ou null (date d'émission de la facture),
+  "montant": nombre ou null (montant total TTC en euros, sans symbole),
+  "objet": string ou null (résumé très court de la nature de la prestation, 5-8 mots maximum),
+  "nature": "charge" ou "immobilisation" (charge = entretien/réparation/service courant ; immobilisation = travaux d'amélioration, d'agrandissement, de reconstruction, ou tout achat de matériel/équipement durable)
+}
+Si une information est illisible ou absente, mets null pour ce champ (jamais pour "nature", choisis la valeur la plus probable). N'invente aucune donnée.`;
+
+app.post('/api/extract-facture', requireAuth, async (req, res) => {
+  if (!anthropicClient) {
+    return res.status(503).json({ error: "Lecture automatique non configurée (option 'anthropic_api_key' vide)." });
+  }
+  const { base64, mimeType } = req.body || {};
+  if (!base64 || !mimeType) return res.status(400).json({ error: 'Fichier manquant.' });
+
+  let contentBlock;
+  if (mimeType === 'application/pdf') {
+    contentBlock = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } };
+  } else if (mimeType.startsWith('image/')) {
+    contentBlock = { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } };
+  } else {
+    return res.status(400).json({ error: 'Format non pris en charge pour la lecture automatique (image ou PDF uniquement).' });
+  }
+
+  try {
+    const response = await anthropicClient.messages.create({
+      model: 'claude-opus-5',
+      max_tokens: 1024,
+      output_config: { effort: 'low' },
+      messages: [{ role: 'user', content: [contentBlock, { type: 'text', text: FACTURE_EXTRACTION_PROMPT }] }]
+    });
+    const textBlock = response.content.find(b => b.type === 'text');
+    if (!textBlock) throw new Error('Réponse vide.');
+    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Aucun JSON trouvé dans la réponse.');
+    const extracted = JSON.parse(jsonMatch[0]);
+    res.json({ extracted });
+  } catch (err) {
+    console.error('[extract-facture] erreur:', err);
+    res.status(500).json({ error: "Échec de la lecture automatique : " + err.message });
+  }
+});
+
 // --- Export complet (sauvegarde quotidienne) ---
 // Combine les deux modes d'authentification : session utilisateur normale
 // (usage manuel depuis l'app) OU clé d'export dédiée (automatisation HA).
