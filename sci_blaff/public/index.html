@@ -897,7 +897,8 @@
       <p class="helper" id="backupStatusMsg">Chargement du statut…</p>
       <div class="btn-row">
         <button class="btn secondary" id="backupDownloadBtn">Télécharger une sauvegarde (.zip)</button>
-        <button class="btn secondary" id="backupDriveNowBtn">Sauvegarder maintenant sur Google Drive</button>
+        <button class="btn" id="connectGoogleDriveBtn" style="display:none;">🔗 Connecter Google Drive</button>
+        <button class="btn secondary" id="backupDriveNowBtn" style="display:none;">Sauvegarder maintenant sur Google Drive</button>
         <span class="helper" id="backupActionMsg" style="align-self:center;"></span>
       </div>
       <p class="helper" style="margin-top:8px;">Une sauvegarde automatique s'envoie aussi chaque nuit vers Google Drive, uniquement si des données ont changé depuis la veille. Cette sauvegarde inclut TOUS les fichiers ajoutés dans l'app (pièces jointes des baux, factures de travaux…).</p>
@@ -1111,6 +1112,7 @@
     window.__currentAuthName = user.name;
     await fetchRemoteData();
     startPolling();
+    refreshBackupStatus();
   }
 
   document.getElementById('loginBtn').addEventListener('click', async ()=>{
@@ -3036,23 +3038,45 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   async function refreshBackupStatus(){
     const el = document.getElementById('backupStatusMsg');
     if(!el) return;
+    const connectBtn = document.getElementById('connectGoogleDriveBtn');
+    const driveNowBtn = document.getElementById('backupDriveNowBtn');
     try{
       const status = await api('api/backup/status');
       if(!status.oauthClientConfigured){
         el.textContent = "Sauvegarde Google Drive non configurée (option manquante côté add-on).";
+        connectBtn.style.display = 'none';
+        driveNowBtn.style.display = 'none';
       } else if(!status.googleDriveConnected){
-        el.textContent = "Google Drive non autorisé pour l'instant.";
-      } else if(status.lastBackupAt){
-        const d = new Date(status.lastBackupAt);
-        el.textContent = `Dernière sauvegarde envoyée sur Drive : ${d.toLocaleString('fr-FR')} (${status.lastStatus || ''})`;
+        el.textContent = "Google Drive non connecté pour l'instant.";
+        connectBtn.style.display = '';
+        driveNowBtn.style.display = 'none';
       } else {
-        el.textContent = "Aucune sauvegarde envoyée sur Drive pour l'instant.";
+        connectBtn.style.display = 'none';
+        driveNowBtn.style.display = '';
+        if(status.lastBackupAt){
+          const d = new Date(status.lastBackupAt);
+          el.textContent = `✓ Google Drive connecté — dernière sauvegarde envoyée le ${d.toLocaleString('fr-FR')} (${status.lastStatus || ''})`;
+        } else {
+          el.textContent = "✓ Google Drive connecté — aucune sauvegarde envoyée pour l'instant.";
+        }
       }
     }catch(err){
       el.textContent = "Impossible de récupérer le statut de sauvegarde.";
     }
   }
-  refreshBackupStatus();
+
+  document.getElementById('connectGoogleDriveBtn').addEventListener('click', ()=>{
+    const token = getToken();
+    const popup = window.open('api/google-oauth/start?token=' + encodeURIComponent(token), '_blank');
+    notify("Une nouvelle page s'est ouverte pour autoriser l'accès à Google Drive.");
+    if(!popup){ setTimeout(refreshBackupStatus, 8000); return; }
+    const watcher = setInterval(()=>{
+      if(popup.closed){
+        clearInterval(watcher);
+        refreshBackupStatus();
+      }
+    }, 1000);
+  });
 
   document.getElementById('backupDownloadBtn').addEventListener('click', async ()=>{
     const btn = document.getElementById('backupDownloadBtn');
