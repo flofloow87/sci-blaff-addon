@@ -1188,6 +1188,18 @@
     await fetchRemoteData();
     startPolling();
     refreshBackupStatus();
+    refreshEmailStatus();
+  }
+
+  async function refreshEmailStatus(){
+    try{
+      const status = await api('api/email/status');
+      window.__emailAutoConfigured = !!status.configured;
+    }catch(err){
+      window.__emailAutoConfigured = false;
+    }
+    renderModeNotice();
+    renderQuittances();
   }
 
   document.getElementById('loginBtn').addEventListener('click', async ()=>{
@@ -2344,10 +2356,10 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         <td>${q.aptLabel}</td>
         <td>${q.monthLabel}</td>
         <td>${fmtEUR(q.total)}</td>
-        <td><span class="tag-pill ${q.datePaid?'paid':'due'}">${q.datePaid?'Payée '+fmtDate(q.datePaid):'En attente'}</span>${q.emailSentAt ? ' <span class="tag-pill" style="background:var(--gold)">✉ préparée</span>' : ''}</td>
+        <td><span class="tag-pill ${q.datePaid?'paid':'due'}">${q.datePaid?'Payée '+fmtDate(q.datePaid):'En attente'}</span>${q.emailSentAt ? ` <span class="tag-pill" style="background:var(--gold)">✉ ${q.emailSentMode==='sent'?'envoyée':'préparée'}</span>` : ''}</td>
         <td>
           <button class="btn secondary small" onclick="window.__viewQuittance('${q.id}')">Voir</button>
-          <button class="btn small" id="sendbtn-${q.id}" onclick="window.__sendQuittanceAuto('${q.id}')">✉ Envoyer</button>
+          <button class="btn small" id="sendbtn-${q.id}" onclick="window.__sendQuittanceAuto('${q.id}')">✉ ${window.__emailAutoConfigured?'Envoyer':'Préparer'}</button>
           ${!q.datePaid ? `<button class="btn secondary small" onclick="window.__markPaid('${q.id}')">Marquer payée</button>` : ''}
           <button class="btn danger small" onclick="window.__deleteQuittance('${q.id}')">✕</button>
         </td>
@@ -2728,7 +2740,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       wrap.innerHTML = '<div class="empty">Aucun envoi pour l\'instant.</div>';
       return;
     }
-    const labels = { prepared: '✓ Préparé', error: '✕ Échec' };
+    const labels = { sent: '✓ Envoyé', prepared: '✓ Préparé', error: '✕ Échec' };
     wrap.innerHTML = DATA.emailLog.map(entry => `
       <div class="log-entry ${entry.status==='error' ? 'error':''}">
         <div class="log-head">
@@ -2804,19 +2816,28 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
 
     try{
       const pdfBase64 = buildQuittancePdfBase64(q, lease, apt, sci);
-      downloadPdfBase64(pdfBase64, filename);
-      openMailtoDraft(lease.email, subject, body);
-      logEmailAttempt({
-        status: 'prepared',
-        to: lease.email,
-        subject,
-        detail: `Le PDF "${filename}" a été téléchargé et votre client mail s'est ouvert avec le message pré-rempli. Il ne reste qu'à joindre le fichier téléchargé et cliquer sur envoyer.`
-      });
+      if(window.__emailAutoConfigured){
+        btns.forEach(b=>{ b.innerHTML = '<span class="spinner"></span>Envoi…'; });
+        await api('api/send-email', { method:'POST', body: JSON.stringify({ to: lease.email, subject, body, pdfBase64, filename }) });
+        logEmailAttempt({ status:'sent', to: lease.email, subject, detail: `Le PDF "${filename}" a été envoyé directement à ${lease.email}.` });
+        notify(`✓ Quittance envoyée par email à ${lease.email}.`);
+        q.emailSentMode = 'sent';
+      } else {
+        downloadPdfBase64(pdfBase64, filename);
+        openMailtoDraft(lease.email, subject, body);
+        logEmailAttempt({
+          status: 'prepared',
+          to: lease.email,
+          subject,
+          detail: `Le PDF "${filename}" a été téléchargé et votre client mail s'est ouvert avec le message pré-rempli. Il ne reste qu'à joindre le fichier téléchargé et cliquer sur envoyer.`
+        });
+        q.emailSentMode = 'prepared';
+      }
       q.emailSentAt = new Date().toISOString();
       saveData();
     } catch(err){
-      logEmailAttempt({ status:'error', to: lease.email, subject, detail: 'Échec de génération du PDF : '+String(err && err.message || err) });
-      notify("Erreur lors de la génération du PDF : " + (err && err.message || err), true);
+      logEmailAttempt({ status:'error', to: lease.email, subject, detail: "Échec de l'envoi : "+String(err && err.message || err) });
+      notify("Erreur lors de l'envoi : " + (err && err.message || err), true);
     }
     renderQuittances();
   };
@@ -2873,7 +2894,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       </div>
       <div class="btn-row no-print" style="justify-content:center; margin-top:16px;">
         <button class="btn" onclick="window.__printIsolated('quittancePreviewWrap')">Imprimer / Exporter en PDF</button>
-        ${lease.email ? `<button class="btn secondary" id="sendbtn-${q.id}" onclick="window.__sendQuittanceAuto('${q.id}')">✉ Préparer l'email pour ${lease.email}</button>` : `<span class="helper" style="align-self:center;">Aucun email enregistré pour ce locataire (à ajouter dans le bail)</span>`}
+        ${lease.email ? `<button class="btn secondary" id="sendbtn-${q.id}" onclick="window.__sendQuittanceAuto('${q.id}')">✉ ${window.__emailAutoConfigured?'Envoyer à':"Préparer l'email pour"} ${lease.email}</button>` : `<span class="helper" style="align-self:center;">Aucun email enregistré pour ce locataire (à ajouter dans le bail)</span>`}
       </div>
     `;
     wrap.scrollIntoView({behavior:'smooth', block:'start'});
@@ -3288,7 +3309,9 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   function renderModeNotice(){
     const wrap = document.getElementById('modeNotice');
     if(!wrap) return;
-    wrap.innerHTML = `<div class="mode-notice">Envoi des quittances par email : le PDF se télécharge et votre client mail s'ouvre avec le message pré-rempli — il suffit de joindre le fichier téléchargé et de cliquer sur envoyer.</div>`;
+    wrap.innerHTML = window.__emailAutoConfigured
+      ? `<div class="mode-notice">✓ Envoi des quittances par email : en un clic, le message part directement avec le PDF en pièce jointe.</div>`
+      : `<div class="mode-notice">Envoi des quittances par email : le PDF se télécharge et votre client mail s'ouvre avec le message pré-rempli — il suffit de joindre le fichier téléchargé et de cliquer sur envoyer. Pour un envoi en un seul clic, renseigne les options <code>smtp_*</code> dans la configuration de l'add-on.</div>`;
   }
 
   // ===========================================================================

@@ -331,6 +331,50 @@ app.post('/api/extract-facture', requireAuth, async (req, res) => {
   }
 });
 
+// --- Envoi automatique des quittances par email (SMTP) ---
+// Permet un envoi en un clic depuis l'app : sans configuration SMTP, le
+// client repasse sur le mode manuel (téléchargement + mailto pré-rempli).
+const SMTP_HOST = process.env.SMTP_HOST || '';
+const SMTP_PORT = parseInt(process.env.SMTP_PORT, 10) || 587;
+const SMTP_USER = process.env.SMTP_USER || '';
+const SMTP_PASSWORD = process.env.SMTP_PASSWORD || '';
+const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER;
+let mailTransporter = null;
+if (SMTP_HOST && SMTP_USER && SMTP_PASSWORD) {
+  const nodemailer = require('nodemailer');
+  mailTransporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASSWORD }
+  });
+}
+
+app.get('/api/email/status', requireAuth, (req, res) => {
+  res.json({ configured: !!mailTransporter });
+});
+
+app.post('/api/send-email', requireAuth, async (req, res) => {
+  if (!mailTransporter) {
+    return res.status(503).json({ error: "Envoi automatique non configuré (options 'smtp_host'/'smtp_user'/'smtp_password' manquantes)." });
+  }
+  const { to, subject, body, pdfBase64, filename } = req.body || {};
+  if (!to || !subject || !body) return res.status(400).json({ error: 'Destinataire, sujet ou message manquant.' });
+  try {
+    await mailTransporter.sendMail({
+      from: SMTP_FROM,
+      to,
+      subject,
+      text: body,
+      attachments: pdfBase64 ? [{ filename: filename || 'quittance.pdf', content: Buffer.from(pdfBase64, 'base64'), contentType: 'application/pdf' }] : []
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[send-email] erreur:', err);
+    res.status(500).json({ error: "Échec de l'envoi : " + err.message });
+  }
+});
+
 // --- Export complet (sauvegarde quotidienne) ---
 // Combine les deux modes d'authentification : session utilisateur normale
 // (usage manuel depuis l'app) OU clé d'export dédiée (automatisation HA).
