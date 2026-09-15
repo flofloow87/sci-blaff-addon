@@ -110,7 +110,7 @@ if (!dataRow) {
     bailTemplate: '',
     associes: [],
     activityLog: [],
-    compta: { planComptable: [], ecritures: [], immobilisations: [], factures: [], exercices: {}, nextEcritureNum: 1, reglages: {} }
+    compta: { planComptable: [], ecritures: [], immobilisations: [], factures: [], decisions: [], exercices: {}, nextEcritureNum: 1, reglages: {} }
   };
   db.prepare('INSERT INTO app_data (id, json, updated_at, updated_by) VALUES (1, ?, ?, ?)')
     .run(JSON.stringify(defaultData), new Date().toISOString(), 'system');
@@ -276,6 +276,59 @@ app.get('/api/attachments/:id', requireAuth, (req, res) => {
 app.delete('/api/attachments/:id', requireAuth, (req, res) => {
   db.prepare('DELETE FROM attachments WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// --- Lecture automatique de factures (IA) ---
+// Envoie le fichier (image ou PDF) à l'API Claude pour en extraire les champs
+// (fournisseur, date, montant, objet, nature) et pré-remplir le formulaire côté
+// client. Nécessite l'option "anthropic_api_key" ; sans elle, la route répond
+// 503 et l'utilisateur remplit le formulaire à la main comme avant.
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+let anthropicClient = null;
+if (ANTHROPIC_API_KEY) {
+  const Anthropic = require('@anthropic-ai/sdk');
+  anthropicClient = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+}
+
+const FACTURE_EXTRACTION_PROMPT = `Extrais ces champs de cette facture française. Réponds UNIQUEMENT ce JSON, sans texte autour, sans markdown :
+{"fournisseur":string|null,"date":"AAAA-MM-JJ"|null,"montant":number|null,"objet":string|null (5 mots max),"nature":"charge"|"immobilisation"}
+nature=immobilisation seulement si amélioration/agrandissement/reconstruction/équipement durable, sinon charge. null si illisible, jamais pour nature. N'invente rien.`;
+
+app.post('/api/extract-facture', requireAuth, async (req, res) => {
+  if (!anthropicClient) {
+    return res.status(503).json({ error: "Lecture automatique non configurée (option 'anthropic_api_key' vide)." });
+  }
+  const { base64, mimeType } = req.body || {};
+  if (!base64 || !mimeType) return res.status(400).json({ error: 'Fichier manquant.' });
+
+  let contentBlock;
+  if (mimeType === 'application/pdf') {
+    contentBlock = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } };
+  } else if (mimeType.startsWith('image/')) {
+    contentBlock = { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } };
+  } else {
+    return res.status(400).json({ error: 'Format non pris en charge pour la lecture automatique (image ou PDF uniquement).' });
+  }
+
+  try {
+    // Haiku 4.5 : modèle le moins cher de la gamme capable de vision — largement
+    // suffisant pour une extraction de champs sur un document net, et sans
+    // "thinking" (non activé) pour ne pas consommer de tokens de raisonnement.
+    const response = await anthropicClient.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 300,
+      messages: [{ role: 'user', content: [contentBlock, { type: 'text', text: FACTURE_EXTRACTION_PROMPT }] }]
+    });
+    const textBlock = response.content.find(b => b.type === 'text');
+    if (!textBlock) throw new Error('Réponse vide.');
+    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Aucun JSON trouvé dans la réponse.');
+    const extracted = JSON.parse(jsonMatch[0]);
+    res.json({ extracted });
+  } catch (err) {
+    console.error('[extract-facture] erreur:', err);
+    res.status(500).json({ error: "Échec de la lecture automatique : " + err.message });
+  }
 });
 
 // --- Export complet (sauvegarde quotidienne) ---

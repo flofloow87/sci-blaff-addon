@@ -11,6 +11,7 @@ EXPORT_API_KEY=$(bashio::config 'export_api_key')
 GOOGLE_CLIENT_ID=$(bashio::config 'google_client_id')
 GOOGLE_CLIENT_SECRET=$(bashio::config 'google_client_secret')
 GOOGLE_DRIVE_FOLDER_ID=$(bashio::config 'google_drive_folder_id')
+ANTHROPIC_API_KEY=$(bashio::config 'anthropic_api_key')
 
 if bashio::config.is_empty 'admin_email' || bashio::config.is_empty 'admin_password'; then
     bashio::log.warning "Options 'admin_email' / 'admin_password' non renseignées."
@@ -27,6 +28,7 @@ export EXPORT_API_KEY
 export GOOGLE_CLIENT_ID
 export GOOGLE_CLIENT_SECRET
 export GOOGLE_DRIVE_FOLDER_ID
+export ANTHROPIC_API_KEY
 
 bashio::log.info "Démarrage du serveur SCI BLAFF sur le port interne 3000…"
 cd /app || bashio::exit.nok "Impossible d'accéder à /app"

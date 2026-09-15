@@ -288,6 +288,18 @@
   .free-entry-row{ display:grid; grid-template-columns:2fr 2fr 1fr 1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
   @media (max-width:720px){ .free-entry-row{ grid-template-columns:1fr 1fr; } }
 
+  .alerte-item{
+    display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 12px;
+    border-left:4px solid var(--sage); background:var(--paper); margin-bottom:8px; font-size:0.88rem; flex-wrap:wrap;
+  }
+  .alerte-item.danger{ border-left-color:var(--brick-dark); }
+  .alerte-item.warning{ border-left-color:var(--gold); }
+  .alerte-item .alerte-action{ font-family:var(--display); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.4px; color:var(--brick-dark); cursor:pointer; background:none; border:none; }
+  .diag-status{ font-family:var(--mono); font-size:0.65rem; padding:2px 8px; text-transform:uppercase; letter-spacing:0.5px; }
+  .diag-status.ok{ background:var(--sage); color:var(--white); }
+  .diag-status.warning{ background:var(--gold); color:var(--white); }
+  .diag-status.danger{ background:var(--brick-dark); color:var(--white); }
+
   .btn[disabled]{ opacity:0.5; cursor:wait; }
   .log-entry{
     border:1px solid var(--line); border-left:4px solid var(--sage); background:var(--white);
@@ -371,6 +383,12 @@
   <section class="view active" id="view-dashboard">
     <h2 class="section-title"><span class="section-num">01</span> Vue d'ensemble</h2>
     <p class="section-sub">Élévation de l'immeuble — RDC et étage</p>
+
+    <div class="panel" id="alertesPanel" style="display:none;">
+      <div class="panel-title">⚠ Alertes &amp; échéances</div>
+      <div id="alertesList"></div>
+    </div>
+
     <div class="building-wrap" id="buildingElevationWrap"></div>
     <div class="building-legend">
       <span><i class="dot occ"></i> Occupé</span>
@@ -585,6 +603,7 @@
       <button data-sub="immos">Immobilisations</button>
       <button data-sub="factures">Factures</button>
       <button data-sub="assoc">Associés &amp; comptes courants</button>
+      <button data-sub="decisions">Décisions (AG)</button>
       <button data-sub="bilan">Bilan</button>
       <button data-sub="resultat">Résultat</button>
       <button data-sub="is">IS &amp; échéances</button>
@@ -693,6 +712,23 @@
           <button class="btn secondary small" id="qa-distribuer">Voter une distribution de dividende</button>
           <button class="btn secondary small" id="qa-verser-dividende">Verser un dividende voté</button>
         </div>
+      </div>
+    </div>
+
+    <!-- DÉCISIONS (AG) -->
+    <div class="compta-sub" id="compta-decisions">
+      <div class="panel">
+        <div class="panel-title">Registre des décisions d'associés</div>
+        <p class="helper" style="margin-bottom:12px;">Une SCI doit consigner les décisions prises par les associés (approbation des comptes annuels, affectation du résultat, autres décisions collectives) — joins le PV signé s'il existe.</p>
+        <div class="field-row"><div><label>Exercice concerné</label><select id="decision-year"></select></div></div>
+        <div class="btn-row">
+          <button class="btn small" id="qa-approuver-comptes">Approuver les comptes de l'exercice sélectionné</button>
+          <button class="btn secondary small" id="qa-decision-libre">+ Autre décision</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Historique des décisions</div>
+        <div id="decisionsList"></div>
       </div>
     </div>
 
@@ -861,7 +897,8 @@
       <p class="helper" id="backupStatusMsg">Chargement du statut…</p>
       <div class="btn-row">
         <button class="btn secondary" id="backupDownloadBtn">Télécharger une sauvegarde (.zip)</button>
-        <button class="btn secondary" id="backupDriveNowBtn">Sauvegarder maintenant sur Google Drive</button>
+        <button class="btn" id="connectGoogleDriveBtn" style="display:none;">🔗 Connecter Google Drive</button>
+        <button class="btn secondary" id="backupDriveNowBtn" style="display:none;">Sauvegarder maintenant sur Google Drive</button>
         <span class="helper" id="backupActionMsg" style="align-self:center;"></span>
       </div>
       <p class="helper" style="margin-top:8px;">Une sauvegarde automatique s'envoie aussi chaque nuit vers Google Drive, uniquement si des données ont changé depuis la veille. Cette sauvegarde inclut TOUS les fichiers ajoutés dans l'app (pièces jointes des baux, factures de travaux…).</p>
@@ -1075,6 +1112,7 @@
     window.__currentAuthName = user.name;
     await fetchRemoteData();
     startPolling();
+    refreshBackupStatus();
   }
 
   document.getElementById('loginBtn').addEventListener('click', async ()=>{
@@ -1312,6 +1350,7 @@
   // ---------- RENDER: DASHBOARD ----------
   function renderDashboard(){
     renderBuildingElevation();
+    renderAlertes();
 
     const recentWrap = document.getElementById('recentQuittances');
     const recent = [...DATA.quittances].sort((a,b)=> b.createdAt.localeCompare(a.createdAt)).slice(0,5);
@@ -1332,6 +1371,7 @@
       const lease = activeLeaseForApt(apt.id);
       const card = document.createElement('div');
       card.className = 'apt-card' + (lease ? ' occupied' : '');
+      const diagAlerte = pireDiagStatus(apt);
       card.innerHTML = `
         <div class="status-dot"></div>
         <div class="apt-label">${apt.label}</div>
@@ -1339,6 +1379,7 @@
         <div class="meta">
           ${apt.surface ? apt.surface+' m²<br>':''}
           ${lease ? `Bail depuis ${fmtDate(lease.start)}<br>${fmtEUR(Number(lease.loyer)+Number(lease.charges||0))}/mois` : 'Disponible à la location'}
+          ${diagAlerte ? `<br><span class="diag-status ${diagAlerte}">${diagAlerte==='danger'?'Diagnostic expiré':'Diagnostic à renouveler'}</span>` : ''}
         </div>
       `;
       card.addEventListener('click', ()=> openAptModal(apt.id));
@@ -1366,7 +1407,23 @@
         </div>
       ` : `<p class="helper">Aucun bail actif. Ajoutez-en un depuis l'onglet Baux.</p>`}
       ${history.length ? `<hr style="border:none;border-top:1px dashed var(--line); margin:16px 0;"><p class="helper">Historique : ${history.length} bail(s) enregistré(s) sur ce lot.</p>` : ''}
+      <hr style="border:none;border-top:1px dashed var(--line); margin:16px 0;">
+      <div class="panel-title">Diagnostics &amp; documents obligatoires</div>
+      <div id="diagList-${aptId}"></div>
+      <div class="btn-row" style="margin-top:10px;">
+        <button class="btn secondary small" onclick="window.__toggleDiagForm('${aptId}')">+ Ajouter un diagnostic</button>
+      </div>
+      <div id="diagForm-${aptId}" style="display:none; margin-top:12px;">
+        <div class="field-row">
+          <div><label>Type</label><select id="diag-type-${aptId}">${DIAG_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
+          <div><label>Date de réalisation</label><input type="date" id="diag-date-${aptId}"></div>
+          <div><label>Date d'expiration (si applicable)</label><input type="date" id="diag-expiration-${aptId}"></div>
+        </div>
+        <div class="field-row"><div><label>Justificatif (PDF, photo…)</label><input type="file" id="diag-file-${aptId}"></div></div>
+        <div class="btn-row"><button class="btn small" onclick="window.__saveDiagnostic('${aptId}')">Enregistrer</button></div>
+      </div>
     `;
+    renderDiagList(aptId);
     document.getElementById('aptModalBg').classList.add('open');
   }
   document.getElementById('aptModalClose').addEventListener('click', ()=> document.getElementById('aptModalBg').classList.remove('open'));
@@ -1381,6 +1438,78 @@
       document.getElementById('aptModalBg').classList.remove('open');
       renderAll();
     }
+  };
+
+  // ---------- DIAGNOSTICS & DOCUMENTS OBLIGATOIRES ----------
+  const DIAG_TYPES = ['DPE','Diagnostic électrique','Diagnostic gaz','Diagnostic plomb (CREP)','État des risques (ERP)','Amiante','Assurance PNO (propriétaire non-occupant)','Détecteur de fumée (DAAF)','Autre'];
+
+  function diagStatus(diag){
+    if(!diag.dateExpiration) return 'ok';
+    const days = (new Date(diag.dateExpiration) - new Date()) / 86400000;
+    if(days < 0) return 'danger';
+    if(days < 60) return 'warning';
+    return 'ok';
+  }
+  function diagStatusLabel(s){ return s==='danger' ? 'Expiré' : s==='warning' ? 'Expire bientôt' : 'À jour'; }
+  function pireDiagStatus(apt){
+    const diags = apt.diagnostics||[];
+    if(diags.some(d=>diagStatus(d)==='danger')) return 'danger';
+    if(diags.some(d=>diagStatus(d)==='warning')) return 'warning';
+    return null;
+  }
+
+  function renderDiagList(aptId){
+    const apt = DATA.apartments.find(a=>a.id===aptId);
+    const wrap = document.getElementById('diagList-'+aptId);
+    if(!apt || !wrap) return;
+    const diags = apt.diagnostics||[];
+    wrap.innerHTML = diags.length===0 ? '<div class="empty">Aucun diagnostic enregistré.</div>' : diags.map(d=>{
+      const st = diagStatus(d);
+      return `<div class="alerte-item ${st==='ok'?'':st}">
+        <span>${d.type}${d.dateExpiration ? ' — expire le '+fmtDate(d.dateExpiration) : (d.dateRealisation ? ' — réalisé le '+fmtDate(d.dateRealisation) : '')}</span>
+        <span>
+          <span class="diag-status ${st}">${diagStatusLabel(st)}</span>
+          ${d.attachments && d.attachments.length ? `<button class="btn secondary small" onclick="window.__downloadAttachment('${aptId}','${d.attachments[0].id}')">Voir</button>` : ''}
+          <button class="btn danger small" onclick="window.__deleteDiagnostic('${aptId}','${d.id}')">Suppr.</button>
+        </span>
+      </div>`;
+    }).join('');
+  }
+
+  window.__toggleDiagForm = function(aptId){
+    const form = document.getElementById('diagForm-'+aptId);
+    if(form) form.style.display = form.style.display==='none' ? 'block' : 'none';
+  };
+
+  window.__saveDiagnostic = async function(aptId){
+    const apt = DATA.apartments.find(a=>a.id===aptId);
+    const type = document.getElementById('diag-type-'+aptId).value;
+    const dateRealisation = document.getElementById('diag-date-'+aptId).value;
+    const dateExpiration = document.getElementById('diag-expiration-'+aptId).value;
+    const file = document.getElementById('diag-file-'+aptId).files[0];
+    const diag = { id: uid('diag'), type, dateRealisation, dateExpiration, attachments: [] };
+    try{
+      if(file){
+        const att = await uploadGenericAttachment(diag.id, file);
+        diag.attachments.push(att);
+      }
+      if(!apt.diagnostics) apt.diagnostics = [];
+      apt.diagnostics.push(diag);
+      logActivity(`Diagnostic ajouté : ${type} — ${apt.label}`);
+      saveData(); renderAll();
+      renderDiagList(aptId);
+      window.__toggleDiagForm(aptId);
+      notify('Diagnostic enregistré.');
+    }catch(err){ notify(err.message, true); }
+  };
+
+  window.__deleteDiagnostic = async function(aptId, diagId){
+    if(!(await confirmDialog('Supprimer ce diagnostic ?'))) return;
+    const apt = DATA.apartments.find(a=>a.id===aptId);
+    apt.diagnostics = (apt.diagnostics||[]).filter(d=>d.id!==diagId);
+    logActivity(`Diagnostic supprimé — ${apt.label}`);
+    saveData(); renderAll();
+    renderDiagList(aptId);
   };
 
   // ---------- LEASES ----------
@@ -2187,6 +2316,70 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     return new Date() > dueDate;
   }
 
+  // ---------- ALERTES & ÉCHÉANCES (tableau de bord) ----------
+  window.__goToView = function(view){
+    const btn = document.querySelector('nav button[data-view="'+view+'"]');
+    if(btn) btn.click();
+  };
+
+  function computeAlertes(){
+    const alertes = [];
+    const overdue = DATA.quittances.filter(isQuittanceOverdue);
+    if(overdue.length>0){
+      const total = overdue.reduce((s,q)=>s+(Number(q.total)||0),0);
+      alertes.push({ level:'danger', text:`${overdue.length} loyer(s) impayé(s) — ${fmtEUR(total)} à relancer`, action:{ label:'Voir', view:'quittances' } });
+    }
+
+    const diagsDanger = [], diagsWarning = [];
+    DATA.apartments.forEach(apt=>{
+      (apt.diagnostics||[]).forEach(d=>{
+        const st = diagStatus(d);
+        if(st==='danger') diagsDanger.push(`${d.type} (${apt.label})`);
+        else if(st==='warning') diagsWarning.push(`${d.type} (${apt.label})`);
+      });
+    });
+    if(diagsDanger.length) alertes.push({ level:'danger', text:`Diagnostic(s) expiré(s) : ${diagsDanger.join(', ')}`, action:{ label:'Voir', view:'apartments' } });
+    if(diagsWarning.length) alertes.push({ level:'warning', text:`Diagnostic(s) à renouveler bientôt : ${diagsWarning.join(', ')}`, action:{ label:'Voir', view:'apartments' } });
+
+    const c = ensureCompta();
+    if(c.ecritures && c.ecritures.length){
+      const bal = computeBalance({});
+      const fourn = -sumSoldePrefix(bal, '401') - sumSoldePrefix(bal, '404');
+      if(fourn > 0.01) alertes.push({ level:'warning', text:`Factures fournisseurs non réglées : ${fmtEUR(fourn)}`, action:{ label:'Voir', view:'accounting' } });
+
+      const currentYear = String(new Date().getFullYear());
+      const prevYear = String(Number(currentYear)-1);
+      const hasPrevData = c.ecritures.some(e=>e.exercice===prevYear);
+      if(hasPrevData){
+        const prevMeta = getExerciceMeta(prevYear);
+        if(!prevMeta.cloture){
+          alertes.push({ level:'warning', text:`L'exercice comptable ${prevYear} n'est pas encore clôturé`, action:{ label:'Clôturer', view:'accounting' } });
+        }
+        const ech = echeancesIS(prevYear);
+        const daysToDeclare = (new Date(ech.declaration) - new Date())/86400000;
+        if(daysToDeclare > 0 && daysToDeclare < 30){
+          alertes.push({ level:'warning', text:`Déclaration de résultat ${prevYear} (n°2065) à déposer avant le ${fmtDate(ech.declaration)}`, action:{ label:'Voir', view:'accounting' } });
+        }
+      }
+    }
+    return alertes;
+  }
+
+  function renderAlertes(){
+    const panel = document.getElementById('alertesPanel');
+    const list = document.getElementById('alertesList');
+    if(!panel || !list) return;
+    const alertes = computeAlertes();
+    if(alertes.length===0){ panel.style.display='none'; return; }
+    panel.style.display='block';
+    list.innerHTML = alertes.map(a=>`
+      <div class="alerte-item ${a.level}">
+        <span>${a.text}</span>
+        ${a.action ? `<button class="alerte-action" onclick="window.__goToView('${a.action.view}')">${a.action.label} →</button>` : ''}
+      </div>
+    `).join('');
+  }
+
   function renderOverdueList(){
     const wrap = document.getElementById('overdueList');
     if(!wrap) return;
@@ -2378,7 +2571,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   function computeAccountingSummary(year){
     const paidQ = DATA.quittances.filter(q => q.month && q.month.startsWith(year+'-') && q.datePaid);
     const byApt = {};
-    DATA.apartments.forEach(apt=>{ byApt[apt.id] = { label: apt.label, total: 0, count: 0 }; });
+    DATA.apartments.forEach(apt=>{ byApt[apt.id] = { label: apt.label, total: 0, count: 0, valeurAcquisition: Number(apt.valeurAcquisition)||0 }; });
     let grandTotal = 0;
     paidQ.forEach(q=>{
       const lease = DATA.leases.find(l=>l.id===q.leaseId);
@@ -2400,13 +2593,16 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     if(!sel || !wrap) return;
     const year = sel.value || String(new Date().getFullYear());
     const summary = computeAccountingSummary(year);
+    const hasValeur = Object.values(summary.byApt).some(row=> row.valeurAcquisition>0);
 
-    let html = `<table><thead><tr><th>Lot</th><th>Quittances encaissées</th><th>Total perçu</th></tr></thead><tbody>`;
+    let html = `<table><thead><tr><th>Lot</th><th>Quittances encaissées</th><th>Total perçu</th>${hasValeur?'<th>Rendement brut</th>':''}</tr></thead><tbody>`;
     Object.values(summary.byApt).forEach(row=>{
-      html += `<tr><td>${row.label}</td><td>${row.count}</td><td>${fmtEUR(row.total)}</td></tr>`;
+      const rendement = row.valeurAcquisition>0 ? (row.total/row.valeurAcquisition*100).toFixed(2)+' %' : '—';
+      html += `<tr><td>${row.label}</td><td>${row.count}</td><td>${fmtEUR(row.total)}</td>${hasValeur?`<td>${rendement}</td>`:''}</tr>`;
     });
-    html += `<tr style="font-weight:bold;"><td>Total</td><td>${summary.count}</td><td>${fmtEUR(summary.grandTotal)}</td></tr>`;
+    html += `<tr style="font-weight:bold;"><td>Total</td><td>${summary.count}</td><td>${fmtEUR(summary.grandTotal)}</td>${hasValeur?'<td></td>':''}</tr>`;
     html += `</tbody></table>`;
+    html += `<p class="helper" style="margin-top:8px;">Rendement brut = loyers perçus dans l'année ÷ valeur d'acquisition renseignée (onglet SCI). Ne tient pas compte des charges, de la fiscalité ni de la vacance.</p>`;
 
     wrap.innerHTML = html;
   }
@@ -2640,6 +2836,10 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
             <option value="Étage" ${apt.etage==='Étage'?'selected':''}>Étage</option>
           </select>
         </div>
+        <div>
+          <label>Valeur d'acquisition (€, optionnel)</label>
+          <input type="number" step="0.01" value="${apt.valeurAcquisition||''}" placeholder="Pour calculer le rendement" onchange="window.__updateApt('${apt.id}','valeurAcquisition',this.value)">
+        </div>
       </div>
     `).join('');
   }
@@ -2838,23 +3038,45 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   async function refreshBackupStatus(){
     const el = document.getElementById('backupStatusMsg');
     if(!el) return;
+    const connectBtn = document.getElementById('connectGoogleDriveBtn');
+    const driveNowBtn = document.getElementById('backupDriveNowBtn');
     try{
       const status = await api('api/backup/status');
       if(!status.oauthClientConfigured){
         el.textContent = "Sauvegarde Google Drive non configurée (option manquante côté add-on).";
+        connectBtn.style.display = 'none';
+        driveNowBtn.style.display = 'none';
       } else if(!status.googleDriveConnected){
-        el.textContent = "Google Drive non autorisé pour l'instant.";
-      } else if(status.lastBackupAt){
-        const d = new Date(status.lastBackupAt);
-        el.textContent = `Dernière sauvegarde envoyée sur Drive : ${d.toLocaleString('fr-FR')} (${status.lastStatus || ''})`;
+        el.textContent = "Google Drive non connecté pour l'instant.";
+        connectBtn.style.display = '';
+        driveNowBtn.style.display = 'none';
       } else {
-        el.textContent = "Aucune sauvegarde envoyée sur Drive pour l'instant.";
+        connectBtn.style.display = 'none';
+        driveNowBtn.style.display = '';
+        if(status.lastBackupAt){
+          const d = new Date(status.lastBackupAt);
+          el.textContent = `✓ Google Drive connecté — dernière sauvegarde envoyée le ${d.toLocaleString('fr-FR')} (${status.lastStatus || ''})`;
+        } else {
+          el.textContent = "✓ Google Drive connecté — aucune sauvegarde envoyée pour l'instant.";
+        }
       }
     }catch(err){
       el.textContent = "Impossible de récupérer le statut de sauvegarde.";
     }
   }
-  refreshBackupStatus();
+
+  document.getElementById('connectGoogleDriveBtn').addEventListener('click', ()=>{
+    const token = getToken();
+    const popup = window.open('api/google-oauth/start?token=' + encodeURIComponent(token), '_blank');
+    notify("Une nouvelle page s'est ouverte pour autoriser l'accès à Google Drive.");
+    if(!popup){ setTimeout(refreshBackupStatus, 8000); return; }
+    const watcher = setInterval(()=>{
+      if(popup.closed){
+        clearInterval(watcher);
+        refreshBackupStatus();
+      }
+    }, 1000);
+  });
 
   document.getElementById('backupDownloadBtn').addEventListener('click', async ()=>{
     const btn = document.getElementById('backupDownloadBtn');
@@ -3045,6 +3267,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     if(!Array.isArray(c.ecritures)) c.ecritures = [];
     if(!Array.isArray(c.immobilisations)) c.immobilisations = [];
     if(!Array.isArray(c.factures)) c.factures = [];
+    if(!Array.isArray(c.decisions)) c.decisions = [];
     if(!c.exercices || typeof c.exercices !== 'object') c.exercices = {};
     if(typeof c.nextEcritureNum !== 'number') c.nextEcritureNum = 1;
     if(!c.reglages || typeof c.reglages !== 'object') c.reglages = {};
@@ -3704,6 +3927,82 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     });
   });
 
+  // ---------- DÉCISIONS D'ASSOCIÉS (AG) ----------
+  function ajouterDecision(decision){
+    const c = ensureCompta();
+    c.decisions.push(Object.assign({ id: uid('decision'), attachments: [], createdAt: new Date().toISOString(), createdBy: getWhoAmI()||'' }, decision));
+    saveData(); renderAll();
+  }
+
+  document.getElementById('qa-approuver-comptes').addEventListener('click', ()=>{
+    const year = document.getElementById('decision-year').value;
+    const cr = computeCompteResultat(year);
+    openComptaModal(`
+      <h3 style="margin-top:0">Approuver les comptes de l'exercice ${year}</h3>
+      <p class="helper">Résultat de l'exercice : <strong>${fmtEUR(cr.resultat)}</strong>.</p>
+      <div class="field-row"><div><label>Date de l'assemblée</label><input type="date" id="qd2-date" value="${todayISO()}"></div></div>
+      <div class="field-row"><div><label>Commentaire (optionnel)</label><textarea id="qd2-notes" placeholder="Ex : approuvé à l'unanimité des associés présents"></textarea></div></div>
+      <div class="field-row"><div><label>PV signé (optionnel)</label><input type="file" id="qd2-file"></div></div>
+      <div class="btn-row"><button class="btn" id="qd2-submit">Enregistrer la décision</button></div>
+    `);
+    document.getElementById('qd2-submit').addEventListener('click', async ()=>{
+      const date = document.getElementById('qd2-date').value;
+      const notes = document.getElementById('qd2-notes').value.trim();
+      const file = document.getElementById('qd2-file').files[0];
+      if(!date){ notify('Date requise.', true); return; }
+      const decision = { date, type:'approbation_comptes', exercice:year, libelle:`Approbation des comptes de l'exercice ${year}`, notes };
+      try{
+        if(file){ decision.attachments = [ await uploadGenericAttachment(uid('decision'), file) ]; }
+      }catch(err){ notify(err.message, true); return; }
+      ajouterDecision(decision);
+      logActivity(`Décision AG : approbation des comptes ${year}`);
+      closeComptaModal();
+      notify('Décision enregistrée.');
+    });
+  });
+
+  document.getElementById('qa-decision-libre').addEventListener('click', ()=>{
+    const year = document.getElementById('decision-year').value;
+    openComptaModal(`
+      <h3 style="margin-top:0">Enregistrer une décision d'associés</h3>
+      <div class="field-row">
+        <div><label>Date</label><input type="date" id="qd3-date" value="${todayISO()}"></div>
+        <div><label>Type</label><select id="qd3-type">
+          <option value="affectation_resultat">Affectation du résultat</option>
+          <option value="autre">Autre décision</option>
+        </select></div>
+      </div>
+      <div class="field-row"><div><label>Libellé</label><input id="qd3-libelle" placeholder="Ex : Affectation du résultat en réserves"></div></div>
+      <div class="field-row"><div><label>Commentaire (optionnel)</label><textarea id="qd3-notes"></textarea></div></div>
+      <div class="field-row"><div><label>PV signé (optionnel)</label><input type="file" id="qd3-file"></div></div>
+      <div class="btn-row"><button class="btn" id="qd3-submit">Enregistrer la décision</button></div>
+    `);
+    document.getElementById('qd3-submit').addEventListener('click', async ()=>{
+      const date = document.getElementById('qd3-date').value;
+      const type = document.getElementById('qd3-type').value;
+      const libelle = document.getElementById('qd3-libelle').value.trim();
+      const notes = document.getElementById('qd3-notes').value.trim();
+      const file = document.getElementById('qd3-file').files[0];
+      if(!date || !libelle){ notify('Date et libellé requis.', true); return; }
+      const decision = { date, type, exercice:year, libelle, notes };
+      try{
+        if(file){ decision.attachments = [ await uploadGenericAttachment(uid('decision'), file) ]; }
+      }catch(err){ notify(err.message, true); return; }
+      ajouterDecision(decision);
+      logActivity(`Décision AG : ${libelle}`);
+      closeComptaModal();
+      notify('Décision enregistrée.');
+    });
+  });
+
+  window.__deleteDecision = async function(id){
+    if(!(await confirmDialog('Supprimer cette décision ?'))) return;
+    const c = ensureCompta();
+    c.decisions = c.decisions.filter(d=>d.id!==id);
+    logActivity('Décision AG supprimée');
+    saveData(); renderAll();
+  };
+
   // ---------- IMMOBILISATIONS : formulaire ----------
   document.getElementById('addImmoBtn').addEventListener('click', ()=> openImmoModal());
   window.__editImmo = function(id){ openImmoModal(ensureCompta().immobilisations.find(i=>i.id===id)); };
@@ -3792,13 +4091,46 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     });
   }
 
-  async function uploadFactureFile(factureId, file){
+  // Réduit une photo avant de l'envoyer à l'IA (uniquement pour la lecture
+  // automatique — le fichier original reste joint tel quel comme justificatif).
+  // 1568px de long côté = la taille au-delà de laquelle Claude redimensionne de
+  // toute façon en interne : envoyer plus grand ne fait que payer des tokens
+  // pour rien. Réencodage en JPEG qualité 0.82 pour réduire encore la taille.
+  function resizeImageForExtraction(file, maxDim = 1568, quality = 0.82){
+    return new Promise((resolve, reject)=>{
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = ()=>{
+        let { width, height } = img;
+        if(width > maxDim || height > maxDim){
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width*scale);
+          height = Math.round(height*scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(blob=>{
+          if(!blob){ reject(new Error("Impossible de traiter l'image.")); return; }
+          const reader = new FileReader();
+          reader.onload = ()=> resolve({ base64: reader.result.split(',')[1], mimeType: 'image/jpeg' });
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        }, 'image/jpeg', quality);
+      };
+      img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('Image invalide.')); };
+      img.src = url;
+    });
+  }
+
+  async function uploadGenericAttachment(entityId, file){
     if(file.size > 20_000_000) throw new Error('Fichier trop volumineux (limite ~20 Mo).');
     const base64 = await readFileAsBase64(file);
     const mimeType = file.type || 'application/octet-stream';
     const uploaded = await api('api/attachments', {
       method: 'POST',
-      body: JSON.stringify({ leaseId: factureId, name: file.name, mimeType, base64 })
+      body: JSON.stringify({ leaseId: entityId, name: file.name, mimeType, base64 })
     });
     return { id: uploaded.id, name: file.name, mimeType, uploadedAt: uploaded.uploadedAt };
   }
@@ -3820,10 +4152,12 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         </select></div>
       </div>
       <div id="qf-nature-fields"></div>
-      <div class="field-row"><div><label>Justificatif (PDF, photo…)</label><input type="file" id="qf-file"></div></div>
+      <div class="field-row"><div><label>Justificatif (PDF, photo…)</label><input type="file" id="qf-file" accept="application/pdf,image/*"></div></div>
+      <p class="helper" id="qf-extract-status"></p>
       <p class="compta-note">Une réparation qui remet en état existant est une charge déductible immédiatement. Des travaux qui améliorent, agrandissent ou prolongent significativement la durée de vie du bien doivent être immobilisés et amortis. En cas de doute, demande à ton expert-comptable.</p>
       <div class="btn-row"><button class="btn" id="qf-submit">Enregistrer la facture</button></div>
     `);
+    document.getElementById('qf-file').addEventListener('change', extraireFactureAuto);
     function renderNatureFields(){
       const nature = document.getElementById('qf-nature').value;
       document.getElementById('qf-nature-fields').innerHTML = nature==='charge' ? `
@@ -3859,6 +4193,41 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     renderNatureFields();
     document.getElementById('qf-nature').addEventListener('change', renderNatureFields);
 
+    async function extraireFactureAuto(){
+      const file = document.getElementById('qf-file').files[0];
+      const statusEl = document.getElementById('qf-extract-status');
+      if(!file) return;
+      const supported = file.type === 'application/pdf' || file.type.startsWith('image/');
+      if(!supported){ statusEl.textContent = ''; return; }
+      statusEl.style.color = '';
+      statusEl.textContent = '🤖 Lecture automatique de la facture en cours…';
+      try{
+        // Le fichier envoyé à l'IA est réduit (photo redimensionnée) pour limiter
+        // les tokens facturés — le fichier ORIGINAL, lui, reste joint tel quel à
+        // la facture comme justificatif une fois enregistrée.
+        const { base64, mimeType } = file.type.startsWith('image/')
+          ? await resizeImageForExtraction(file)
+          : { base64: await readFileAsBase64(file), mimeType: file.type };
+        const result = await api('api/extract-facture', { method:'POST', body: JSON.stringify({ base64, mimeType }) });
+        const ex = result.extracted || {};
+        const dateEl = document.getElementById('qf-date');
+        const fournisseurEl = document.getElementById('qf-fournisseur');
+        const objetEl = document.getElementById('qf-objet');
+        const montantEl = document.getElementById('qf-montant');
+        const natureEl = document.getElementById('qf-nature');
+        if(ex.date && /^\d{4}-\d{2}-\d{2}$/.test(ex.date)) dateEl.value = ex.date;
+        if(ex.fournisseur && !fournisseurEl.value.trim()) fournisseurEl.value = ex.fournisseur;
+        if(ex.objet && !objetEl.value.trim()) objetEl.value = ex.objet;
+        if(ex.montant && !montantEl.value) montantEl.value = ex.montant;
+        if(ex.nature==='charge' || ex.nature==='immobilisation'){ natureEl.value = ex.nature; renderNatureFields(); }
+        statusEl.style.color = '';
+        statusEl.textContent = '✓ Champs pré-remplis automatiquement — vérifie avant d\'enregistrer.';
+      }catch(err){
+        statusEl.style.color = 'var(--brick-dark)';
+        statusEl.textContent = "⚠ Lecture automatique indisponible (" + (err && err.message || err) + ") — remplis les champs manuellement.";
+      }
+    }
+
     document.getElementById('qf-submit').addEventListener('click', async ()=>{
       const date = document.getElementById('qf-date').value;
       const fournisseur = document.getElementById('qf-fournisseur').value.trim();
@@ -3892,7 +4261,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
           facture.immobilisationId = immo.id;
         }
         if(file){
-          const att = await uploadFactureFile(facture.id, file);
+          const att = await uploadGenericAttachment(facture.id, file);
           facture.attachments.push(att);
         }
         ensureCompta().factures.push(facture);
@@ -3918,7 +4287,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const file = input.files[0];
     if(!file){ notify('Choisis d\'abord un fichier.', true); return; }
     try{
-      const att = await uploadFactureFile(factureId, file);
+      const att = await uploadGenericAttachment(factureId, file);
       const facture = ensureCompta().factures.find(f=>f.id===factureId);
       facture.attachments.push(att);
       logActivity(`Pièce jointe ajoutée à la facture : ${facture.objet}`);
@@ -4064,12 +4433,16 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const cr = computeCompteResultat(year);
     const bilan = computeBilan(year);
     const isCalc = calculIS(year);
+    const summary = computeAccountingSummary(year);
+    const valeurTotale = Object.values(summary.byApt).reduce((s,r)=>s+r.valeurAcquisition,0);
+    const rendement = valeurTotale>0 ? (summary.grandTotal/valeurTotale*100).toFixed(2)+' %' : null;
     const kpis = document.getElementById('comptaKpis');
     kpis.innerHTML = `
       <div class="kpi-card ${cr.resultat>=0?'positive':'negative'}"><div class="kpi-label">Résultat comptable ${year}</div><div class="kpi-value">${fmtEUR(cr.resultat)}</div></div>
       <div class="kpi-card"><div class="kpi-label">Trésorerie (banque + caisse)</div><div class="kpi-value">${fmtEUR(bilan.actif.banque)}</div></div>
       <div class="kpi-card"><div class="kpi-label">IS estimé ${year}</div><div class="kpi-value">${fmtEUR(isCalc.is)}</div></div>
       <div class="kpi-card"><div class="kpi-label">Comptes courants associés</div><div class="kpi-value">${fmtEUR(bilan.passif.ccAssocies)}</div></div>
+      ${rendement ? `<div class="kpi-card"><div class="kpi-label">Rendement locatif brut ${year}</div><div class="kpi-value">${rendement}</div></div>` : ''}
     `;
     document.getElementById('comptaBoardResultat').innerHTML = `
       <table class="compact"><tbody>
@@ -4172,6 +4545,29 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         ${(DATA.associes||[]).map(a=>`<tr><td>${a.name}</td><td class="num-col">${fmtEUR(dividendeDuAssocie(a.id))}</td></tr>`).join('')}
       </tbody></table>`;
     }
+  }
+
+  function renderDecisions(){
+    populateYearSelect('decision-year');
+    const wrap = document.getElementById('decisionsList');
+    if(!wrap) return;
+    const c = ensureCompta();
+    const decisions = [...c.decisions].sort((a,b)=> b.date.localeCompare(a.date));
+    if(decisions.length===0){ wrap.innerHTML = '<div class="empty">Aucune décision enregistrée pour l\'instant.</div>'; return; }
+    const typeLabel = { approbation_comptes:'Approbation des comptes', affectation_resultat:'Affectation du résultat', autre:'Autre décision' };
+    wrap.innerHTML = decisions.map(d=> `
+      <div class="ecriture-block">
+        <div class="ecriture-head">
+          <span>${fmtDate(d.date)} · ${typeLabel[d.type]||d.type}${d.exercice?' — exercice '+d.exercice:''}</span>
+          <span>${d.libelle}</span>
+          <button class="btn danger small" onclick="window.__deleteDecision('${d.id}')">Supprimer</button>
+        </div>
+        <div style="padding:12px;">
+          ${d.notes ? `<p class="helper" style="margin:0 0 8px;">${d.notes}</p>` : ''}
+          ${(d.attachments||[]).length ? d.attachments.map(a=>`<button class="btn secondary small" onclick="window.__downloadAttachment('${d.id}','${a.id}')">Voir ${a.name}</button>`).join(' ') : '<span class="helper">Aucun PV joint.</span>'}
+        </div>
+      </div>
+    `).join('');
   }
 
   function renderBilan(){
@@ -4331,6 +4727,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     renderImmos();
     renderFactures();
     renderAssociesComptes();
+    renderDecisions();
     renderBilan();
     renderResultat();
     renderIS();
