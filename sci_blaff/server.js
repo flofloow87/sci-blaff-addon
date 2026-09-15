@@ -290,15 +290,9 @@ if (ANTHROPIC_API_KEY) {
   anthropicClient = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 }
 
-const FACTURE_EXTRACTION_PROMPT = `Tu analyses une facture pour une SCI française. Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ni après, sans balises markdown, au format exact suivant :
-{
-  "fournisseur": string ou null,
-  "date": string au format AAAA-MM-JJ ou null (date d'émission de la facture),
-  "montant": nombre ou null (montant total TTC en euros, sans symbole),
-  "objet": string ou null (résumé très court de la nature de la prestation, 5-8 mots maximum),
-  "nature": "charge" ou "immobilisation" (charge = entretien/réparation/service courant ; immobilisation = travaux d'amélioration, d'agrandissement, de reconstruction, ou tout achat de matériel/équipement durable)
-}
-Si une information est illisible ou absente, mets null pour ce champ (jamais pour "nature", choisis la valeur la plus probable). N'invente aucune donnée.`;
+const FACTURE_EXTRACTION_PROMPT = `Extrais ces champs de cette facture française. Réponds UNIQUEMENT ce JSON, sans texte autour, sans markdown :
+{"fournisseur":string|null,"date":"AAAA-MM-JJ"|null,"montant":number|null,"objet":string|null (5 mots max),"nature":"charge"|"immobilisation"}
+nature=immobilisation seulement si amélioration/agrandissement/reconstruction/équipement durable, sinon charge. null si illisible, jamais pour nature. N'invente rien.`;
 
 app.post('/api/extract-facture', requireAuth, async (req, res) => {
   if (!anthropicClient) {
@@ -317,10 +311,12 @@ app.post('/api/extract-facture', requireAuth, async (req, res) => {
   }
 
   try {
+    // Haiku 4.5 : modèle le moins cher de la gamme capable de vision — largement
+    // suffisant pour une extraction de champs sur un document net, et sans
+    // "thinking" (non activé) pour ne pas consommer de tokens de raisonnement.
     const response = await anthropicClient.messages.create({
-      model: 'claude-opus-5',
-      max_tokens: 1024,
-      output_config: { effort: 'low' },
+      model: 'claude-haiku-4-5',
+      max_tokens: 300,
       messages: [{ role: 'user', content: [contentBlock, { type: 'text', text: FACTURE_EXTRACTION_PROMPT }] }]
     });
     const textBlock = response.content.find(b => b.type === 'text');
