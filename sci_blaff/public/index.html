@@ -718,6 +718,10 @@
         <svg viewBox="0 0 20 20" fill="none"><rect x="4" y="2.5" width="12" height="15" rx="1" stroke="currentColor" stroke-width="1.5"/><line x1="6.5" y1="6.5" x2="13.5" y2="6.5" stroke="currentColor" stroke-width="1.3"/><line x1="6.5" y1="9.5" x2="13.5" y2="9.5" stroke="currentColor" stroke-width="1.3"/><line x1="6.5" y1="12.5" x2="11" y2="12.5" stroke="currentColor" stroke-width="1.3"/></svg>
         Écritures
       </button>
+      <button data-sub="banque">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M2.5 8L10 3l7.5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="3" y="8.5" width="14" height="7.5" rx="0.6" stroke="currentColor" stroke-width="1.4"/><line x1="6" y1="8.5" x2="6" y2="16" stroke="currentColor" stroke-width="1.2"/><line x1="10" y1="8.5" x2="10" y2="16" stroke="currentColor" stroke-width="1.2"/><line x1="14" y1="8.5" x2="14" y2="16" stroke="currentColor" stroke-width="1.2"/><line x1="2.5" y1="17" x2="17.5" y2="17" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        Banque
+      </button>
       <button data-sub="immos">
         <svg viewBox="0 0 20 20" fill="none"><path d="M3 17V8L10 3l7 5v9" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><line x1="7.5" y1="17" x2="7.5" y2="11" stroke="currentColor" stroke-width="1.3"/><line x1="12.5" y1="17" x2="12.5" y2="11" stroke="currentColor" stroke-width="1.3"/></svg>
         Immobilisations
@@ -794,6 +798,15 @@
       <div class="panel">
         <div class="panel-title">Actions rapides</div>
         <p class="helper" style="margin-bottom:12px;">Chaque action génère automatiquement la bonne écriture en partie double (débit/crédit) — aucune connaissance comptable requise.</p>
+        <div class="field-row" style="max-width:320px; margin-bottom:12px;">
+          <div>
+            <label>Compte bancaire utilisé pour ces actions</label>
+            <select id="compteBancaireSelect">
+              <option value="512001">Société Générale</option>
+              <option value="512002">Indy</option>
+            </select>
+          </div>
+        </div>
         <div class="btn-row">
           <button class="btn small" id="qa-encaisser-loyers">💶 Générer les encaissements de loyers manquants</button>
           <button class="btn secondary small" id="qa-charge">➕ Enregistrer une charge / dépense</button>
@@ -808,6 +821,32 @@
           <div><label>Exercice</label><select id="ecritures-year"></select></div>
         </div>
         <div id="ecrituresList"></div>
+      </div>
+    </div>
+
+    <!-- BANQUE -->
+    <div class="compta-sub" id="compta-banque">
+      <div class="grid4" id="banqueSoldes"></div>
+      <div class="panel">
+        <div class="panel-title">Importer un relevé bancaire</div>
+        <p class="helper" style="margin-bottom:12px;">Exporte un relevé au format CSV depuis ta banque en ligne (Société Générale ou Indy), puis dépose-le ici. Les lignes sont rapprochées automatiquement des écritures déjà enregistrées (même montant, date proche) ; le reste est à traiter manuellement.</p>
+        <div class="field-row">
+          <div><label>Compte concerné</label><select id="bk-import-compte">
+            <option value="512001">Société Générale</option>
+            <option value="512002">Indy</option>
+          </select></div>
+        </div>
+        <div id="bkDropzoneWrap"></div>
+        <div id="bkMappingWrap" style="display:none; margin-top:14px;"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Relevés importés</div>
+        <div id="bkImportsList"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Écritures bancaires non pointées</div>
+        <p class="helper" style="margin-bottom:12px;">Écritures sur un compte bancaire qui n'apparaissent dans aucun relevé importé — à vérifier (oubli, erreur, ou relevé pas encore importé).</p>
+        <div id="bkNonPointeesWrap"></div>
       </div>
     </div>
 
@@ -947,6 +986,12 @@
         <p class="helper" style="margin-bottom:12px;">Format réglementaire (article A47 A-1 du LPF), à produire en cas de contrôle fiscal. Nécessite le SIRET (onglet SCI) et un exercice clôturé.</p>
         <div class="field-row"><div><label>Exercice</label><select id="fec-year"></select></div></div>
         <div class="btn-row"><button class="btn" id="exportFecBtn">Exporter le FEC</button></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Liasse fiscale simplifiée</div>
+        <p class="helper" style="margin-bottom:12px;">Document préparatoire regroupant, pour l'exercice choisi, les chiffres nécessaires à la déclaration de résultat (formulaire 2065 et annexes simplifiées 2033). <strong>Ce n'est pas le formulaire CERFA officiel</strong> — reporte ces montants dans les bonnes cases toi-même ou fais-le vérifier par un expert-comptable avant tout dépôt.</p>
+        <div class="field-row"><div><label>Exercice</label><select id="liasse-year"></select></div></div>
+        <div class="btn-row"><button class="btn" id="exportLiasseBtn">Générer la liasse simplifiée (PDF)</button></div>
       </div>
       <div class="panel">
         <div class="panel-title">Journal d'activité</div>
@@ -1282,6 +1327,18 @@
     if(nameEl) nameEl.textContent = file ? '✓ ' + file.name : '';
   });
   document.getElementById('sciDocDropzoneWrap').innerHTML = dropzoneHtml('sciDocFileInput');
+  document.getElementById('bkDropzoneWrap').innerHTML = dropzoneHtml('bkFileInput', '.csv,text/csv');
+  document.getElementById('bkFileInput').addEventListener('change', async ()=>{
+    const file = document.getElementById('bkFileInput').files[0];
+    if(!file) return;
+    try{
+      const text = await readFileTextSmart(file);
+      const { headers, rows } = parseCsvText(text);
+      if(headers.length < 2){ notify('Fichier illisible ou format non reconnu (CSV attendu).', true); return; }
+      bkParsedData = { headers, rows, fileName: file.name };
+      renderBankMappingUI();
+    }catch(err){ notify('Erreur de lecture du fichier : ' + (err && err.message || err), true); }
+  });
 
   window.__logoB64 = document.querySelector('header img').src.split(',')[1];
   document.getElementById('loginLogoImg').src = document.querySelector('header img').src;
@@ -1530,7 +1587,10 @@
     if(DATA.activityLog.length > 200) DATA.activityLog.length = 200;
   }
 
-  function fmtEUR(n){ return (Number(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' €'; }
+  // Remplace l'espace fine insécable (U+202F) utilisée par toLocaleString('fr-FR')
+  // par une espace normale : la police par défaut de jsPDF ne sait pas l'afficher
+  // et la rend comme un caractère aberrant (ex: "1 400,00" devenait "1/400,00").
+  function fmtEUR(n){ return (Number(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2, maximumFractionDigits:2}).replace(/[  ]/g,' ') + ' €'; }
   function fmtDate(d){ if(!d) return '—'; const [y,m,day]=d.split('-'); return `${day}/${m}/${y}`; }
 
   function activeLeaseForApt(aptId){
@@ -3674,7 +3734,9 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     { compte:'445660', libelle:'État — TVA déductible', type:'actif', nature:'D' },
     { compte:'455000', libelle:'Associés — comptes courants', type:'passif', nature:'C' },
     { compte:'457000', libelle:'Associés — dividendes à payer', type:'passif', nature:'C' },
-    { compte:'512000', libelle:'Banque', type:'actif', nature:'D' },
+    { compte:'512000', libelle:'Banque (historique / non affectée)', type:'actif', nature:'D' },
+    { compte:'512001', libelle:'Banque — Société Générale', type:'actif', nature:'D' },
+    { compte:'512002', libelle:'Banque — Indy', type:'actif', nature:'D' },
     { compte:'530000', libelle:'Caisse', type:'actif', nature:'D' },
     { compte:'613000', libelle:'Locations diverses (matériel, coffres…)', type:'charge', nature:'D' },
     { compte:'615000', libelle:'Entretien et réparations', type:'charge', nature:'D' },
@@ -3712,12 +3774,29 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     if(typeof c.reglages.tauxReduit !== 'number') c.reglages.tauxReduit = 15;
     if(typeof c.reglages.seuilReduit !== 'number') c.reglages.seuilReduit = 42500;
     if(typeof c.reglages.tauxNormal !== 'number') c.reglages.tauxNormal = 25;
+    if(!c.reglages.compteBancaire) c.reglages.compteBancaire = '512001';
+    if(!Array.isArray(c.relevesBancaires)) c.relevesBancaires = [];
     return c;
   }
 
   function compteDef(code){
     const c = ensureCompta();
     return c.planComptable.find(p=>p.compte===code) || { compte:code, libelle:'(compte inconnu)', type:'charge', nature:'D' };
+  }
+
+  // ---------- COMPTES BANCAIRES (Société Générale / Indy) ----------
+  // Un seul compte "banque" servait jusqu'ici à toutes les écritures ; les
+  // actions rapides utilisent maintenant celui choisi ici comme compte par
+  // défaut. Le bilan et la trésorerie agrègent toujours tout ce qui commence
+  // par 512 (préfixe), donc les anciennes écritures sur 512000 restent comptées.
+  const COMPTES_BANCAIRES = [
+    { compte:'512001', label:'Société Générale' },
+    { compte:'512002', label:'Indy' }
+  ];
+  function compteBancaireActif(){ return ensureCompta().reglages.compteBancaire; }
+  function labelCompteBancaire(compte){
+    const found = COMPTES_BANCAIRES.find(b=>b.compte===compte);
+    return found ? found.label : compteDef(compte).libelle;
   }
 
   function pad2(n){ return String(n).padStart(2,'0'); }
@@ -4029,7 +4108,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     if(manquantes.length === 0){ notify('Aucun encaissement de loyer à générer : tout est déjà comptabilisé.'); return; }
     let count = 0, skipped = 0;
     manquantes.forEach(q=>{
-      const lignes = [{ compte:'512000', debit: Number(q.total)||0, libelle:`Encaissement loyer — ${q.tenant}` }];
+      const lignes = [{ compte:compteBancaireActif(), debit: Number(q.total)||0, libelle:`Encaissement loyer — ${q.tenant}` }];
       if(Number(q.loyer)) lignes.push({ compte:'706100', credit: Number(q.loyer), libelle:`Loyer ${q.monthLabel} — ${q.tenant}` });
       if(Number(q.charges)) lignes.push({ compte:'708000', credit: Number(q.charges), libelle:`Charges refacturées ${q.monthLabel} — ${q.tenant}` });
       try{
@@ -4092,7 +4171,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       const mode = document.getElementById('qc-mode').value;
       if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
       try{
-        const contrepartie = mode==='banque' ? { compte:'512000', credit:montant }
+        const contrepartie = mode==='banque' ? { compte:compteBancaireActif(), credit:montant }
           : mode==='fournisseur' ? { compte:'401000', credit:montant, libelle }
           : (()=>{ const sel=document.getElementById('qc-associe'); return { compte:'455000', credit:montant, compAuxNum:sel.value, compAuxLib: sel.selectedOptions[0].dataset.name }; })();
         addEcriture({ date, journal: mode==='banque'?'BQ':'AC', libelle, lignes:[ { compte, debit:montant, libelle }, contrepartie ] });
@@ -4123,7 +4202,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       const montant = Number(document.getElementById('qp-montant').value);
       if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
       try{
-        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'512000', debit:montant, libelle }, { compte, credit:montant, libelle } ] });
+        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:compteBancaireActif(), debit:montant, libelle }, { compte, credit:montant, libelle } ] });
         logActivity(`Encaissement enregistré : ${libelle} (${fmtEUR(montant)})`);
         saveData(); renderAll(); closeComptaModal();
         notify('Encaissement enregistré.');
@@ -4167,11 +4246,11 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       if(!date || capital<=0){ notify('Date et montant valides requis.', true); return; }
       try{
         if(type==='souscription'){
-          addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'512000', debit:capital, libelle }, { compte:'164000', credit:capital, libelle } ] });
+          addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:compteBancaireActif(), debit:capital, libelle }, { compte:'164000', credit:capital, libelle } ] });
         } else {
           const lignes = [ { compte:'164000', debit:capital, libelle } ];
           if(interets>0) lignes.push({ compte:'661000', debit:interets, libelle:'Intérêts emprunt' });
-          lignes.push({ compte:'512000', credit: capital+interets, libelle });
+          lignes.push({ compte:compteBancaireActif(), credit: capital+interets, libelle });
           addEcriture({ date, journal:'BQ', libelle, lignes });
         }
         logActivity(`Emprunt : ${libelle} (${fmtEUR(capital+interets)})`);
@@ -4246,6 +4325,10 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   }
 
   document.getElementById('qa-encaisser-loyers').addEventListener('click', genererEncaissementsLoyers);
+  document.getElementById('compteBancaireSelect').addEventListener('change', (e)=>{
+    ensureCompta().reglages.compteBancaire = e.target.value;
+    saveData();
+  });
 
   document.getElementById('qa-apport-cc').addEventListener('click', ()=>{
     openComptaModal(`
@@ -4264,7 +4347,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
       const libelle = `Apport compte courant — ${sel.selectedOptions[0].dataset.name}`;
       try{
-        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'512000', debit:montant, libelle }, { compte:'455000', credit:montant, libelle, compAuxNum:sel.value, compAuxLib:sel.selectedOptions[0].dataset.name } ] });
+        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:compteBancaireActif(), debit:montant, libelle }, { compte:'455000', credit:montant, libelle, compAuxNum:sel.value, compAuxLib:sel.selectedOptions[0].dataset.name } ] });
         logActivity(libelle + ` (${fmtEUR(montant)})`);
         saveData(); renderAll(); closeComptaModal();
         notify('Apport enregistré.');
@@ -4288,7 +4371,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
       const libelle = `Remboursement compte courant — ${sel.selectedOptions[0].dataset.name}`;
       try{
-        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'455000', debit:montant, libelle, compAuxNum:sel.value, compAuxLib:sel.selectedOptions[0].dataset.name }, { compte:'512000', credit:montant, libelle } ] });
+        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'455000', debit:montant, libelle, compAuxNum:sel.value, compAuxLib:sel.selectedOptions[0].dataset.name }, { compte:compteBancaireActif(), credit:montant, libelle } ] });
         logActivity(libelle + ` (${fmtEUR(montant)})`);
         saveData(); renderAll(); closeComptaModal();
         notify('Remboursement enregistré.');
@@ -4355,7 +4438,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       if(!date || !montant || montant<=0){ notify('Date et montant valides requis.', true); return; }
       const libelle = `Versement dividende — ${sel.selectedOptions[0].dataset.name}`;
       try{
-        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'457000', debit:montant, libelle, compAuxNum:sel.value, compAuxLib:sel.selectedOptions[0].dataset.name }, { compte:'512000', credit:montant, libelle } ] });
+        addEcriture({ date, journal:'BQ', libelle, lignes:[ { compte:'457000', debit:montant, libelle, compAuxNum:sel.value, compAuxLib:sel.selectedOptions[0].dataset.name }, { compte:compteBancaireActif(), credit:montant, libelle } ] });
         logActivity(libelle + ` (${fmtEUR(montant)})`);
         saveData(); renderAll(); closeComptaModal();
         notify('Versement enregistré.');
@@ -4678,7 +4761,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         if(nature==='charge'){
           const compte = document.getElementById('qf-compte').value;
           const mode = document.getElementById('qf-mode').value;
-          const contrepartie = mode==='banque' ? { compte:'512000', credit:montant }
+          const contrepartie = mode==='banque' ? { compte:compteBancaireActif(), credit:montant }
             : mode==='fournisseur' ? { compte:'401000', credit:montant, libelle }
             : (()=>{ const sel=document.getElementById('qf-associe'); return { compte:'455000', credit:montant, compAuxNum:sel.value, compAuxLib: sel.selectedOptions[0].dataset.name }; })();
           const ecr = addEcriture({ date, journal: mode==='banque'?'BQ':'AC', libelle, lignes:[ { compte, debit:montant, libelle }, contrepartie ] });
@@ -5038,9 +5121,352 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     });
   }
 
+  // ---------- RAPPROCHEMENT BANCAIRE ----------
+  // Lit un fichier en UTF-8 par défaut, avec repli en Windows-1252 (encodage
+  // fréquent des exports bancaires plus anciens) si l'UTF-8 produit des
+  // caractères de remplacement — évite d'imposer un encodage à l'utilisateur.
+  async function readFileTextSmart(file){
+    const buf = await file.arrayBuffer();
+    let text = new TextDecoder('utf-8', { fatal:false }).decode(buf);
+    if(text.includes('�')){
+      try{ text = new TextDecoder('windows-1252').decode(buf); }catch(e){ /* garde le texte UTF-8 tel quel */ }
+    }
+    return text;
+  }
+
+  function detectCsvDelimiter(headerLine){
+    const semi = (headerLine.match(/;/g)||[]).length;
+    const comma = (headerLine.match(/,/g)||[]).length;
+    return semi >= comma ? ';' : ',';
+  }
+
+  function parseCsvLine(line, delim){
+    const cells = []; let cur = ''; let inQuotes = false;
+    for(let i=0;i<line.length;i++){
+      const ch = line[i];
+      if(inQuotes){
+        if(ch === '"'){ if(line[i+1] === '"'){ cur += '"'; i++; } else { inQuotes = false; } }
+        else cur += ch;
+      } else {
+        if(ch === '"') inQuotes = true;
+        else if(ch === delim){ cells.push(cur); cur = ''; }
+        else cur += ch;
+      }
+    }
+    cells.push(cur);
+    return cells.map(c=>c.trim());
+  }
+
+  function parseCsvText(text){
+    const lines = text.split(/\r\n|\r|\n/).filter(l=>l.trim().length>0);
+    if(lines.length===0) return { headers:[], rows:[] };
+    const delim = detectCsvDelimiter(lines[0]);
+    const headers = parseCsvLine(lines[0], delim);
+    const rows = lines.slice(1).map(l=>parseCsvLine(l, delim));
+    return { headers, rows };
+  }
+
+  // Formats FR : "12/03/2026" (JJ/MM/AAAA) ou ISO "2026-03-12".
+  function parseFlexibleDate(str){
+    str = (str||'').trim();
+    let m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+    m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if(m) return `${m[3]}-${pad2(Number(m[2]))}-${pad2(Number(m[1]))}`;
+    return null;
+  }
+
+  // Montants FR : "1 234,56", "-45,00 €", "(45,00)" (négatif entre parenthèses)…
+  function parseFlexibleAmount(str){
+    if(str==null) return null;
+    let s = String(str).trim();
+    if(s==='') return null;
+    s = s.replace(/[€\s ]/g, '');
+    const neg = /^-/.test(s) || /^\(.*\)$/.test(s);
+    s = s.replace(/^[-+]/,'').replace(/[()]/g,'');
+    if(s.includes(',') && s.includes('.')) s = s.replace(/\./g,'').replace(',', '.');
+    else if(s.includes(',')) s = s.replace(',', '.');
+    const num = parseFloat(s);
+    if(isNaN(num)) return null;
+    return neg ? -num : num;
+  }
+
+  function detectBankColumns(headers){
+    const norm = h => h.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+    const find = (re) => headers.findIndex(h=>re.test(norm(h)));
+    return {
+      dateIdx: find(/date/),
+      libelleIdx: find(/libell|intitul|description|detail|communication/),
+      montantIdx: find(/^montant$|^amount$/),
+      debitIdx: find(/debit/),
+      creditIdx: find(/credit/)
+    };
+  }
+
+  let bkParsedData = null;
+
+  function ecritureMontantSurCompte(e, compte){
+    let total = 0;
+    e.lignes.forEach(l=>{ if(l.compte===compte) total += (l.debit||0) - (l.credit||0); });
+    return total;
+  }
+
+  function matchReleve(releve){
+    const c = ensureCompta();
+    const usedEcritureIds = new Set();
+    c.relevesBancaires.forEach(r=>{ if(r.compte===releve.compte) r.lignes.forEach(l=>{ if(l.ecritureId) usedEcritureIds.add(l.ecritureId); }); });
+    const candidats = c.ecritures.filter(e=> e.lignes.some(l=>l.compte===releve.compte));
+    releve.lignes.forEach(ligne=>{
+      if(ligne.ecritureId) return;
+      let best = null, bestDiff = Infinity;
+      candidats.forEach(e=>{
+        if(usedEcritureIds.has(e.id)) return;
+        if(Math.abs(ecritureMontantSurCompte(e, releve.compte) - ligne.montant) > 0.01) return;
+        const diff = Math.abs(new Date(e.date) - new Date(ligne.date));
+        if(diff < bestDiff && diff <= 10*86400000){ best = e; bestDiff = diff; }
+      });
+      if(best){ ligne.ecritureId = best.id; usedEcritureIds.add(best.id); }
+    });
+  }
+
+  function renderBankMappingUI(){
+    const wrap = document.getElementById('bkMappingWrap');
+    if(!wrap) return;
+    if(!bkParsedData){ wrap.style.display='none'; wrap.innerHTML=''; return; }
+    const { headers, rows } = bkParsedData;
+    const detected = detectBankColumns(headers);
+    const hasDebitCredit = detected.debitIdx>=0 && detected.creditIdx>=0;
+    const opt = (idx) => headers.map((h,i)=>`<option value="${i}" ${i===idx?'selected':''}>${h}</option>`).join('');
+    wrap.style.display='block';
+    wrap.innerHTML = `
+      <div class="field-row">
+        <div><label>Colonne date</label><select id="bkmap-date">${opt(detected.dateIdx>=0?detected.dateIdx:0)}</select></div>
+        <div><label>Colonne libellé</label><select id="bkmap-libelle">${opt(detected.libelleIdx>=0?detected.libelleIdx:0)}</select></div>
+      </div>
+      <div class="field-row">
+        <div><label>Format du montant</label><select id="bkmap-type">
+          <option value="single" ${!hasDebitCredit?'selected':''}>Une colonne montant (signé)</option>
+          <option value="debitcredit" ${hasDebitCredit?'selected':''}>Colonnes Débit / Crédit séparées</option>
+        </select></div>
+      </div>
+      <div id="bkmap-amount-fields"></div>
+      <div class="compta-note">Aperçu des 5 premières lignes — vérifie que les colonnes sont bien reconnues avant d'importer.</div>
+      <div id="bkmap-preview"></div>
+      <div class="btn-row" style="margin-top:10px;"><button class="btn" id="bkImportConfirmBtn">Importer les lignes</button></div>
+    `;
+    function currentMapping(){
+      const type = document.getElementById('bkmap-type').value;
+      return {
+        dateIdx: Number(document.getElementById('bkmap-date').value),
+        libelleIdx: Number(document.getElementById('bkmap-libelle').value),
+        type,
+        montantIdx: type==='single' ? Number(document.getElementById('bkmap-montant').value) : null,
+        debitIdx: type==='debitcredit' ? Number(document.getElementById('bkmap-debit').value) : null,
+        creditIdx: type==='debitcredit' ? Number(document.getElementById('bkmap-credit').value) : null
+      };
+    }
+    function mapRow(row, mapping){
+      const date = parseFlexibleDate(row[mapping.dateIdx]);
+      const libelle = (row[mapping.libelleIdx]||'').trim();
+      let montant;
+      if(mapping.type==='single') montant = parseFlexibleAmount(row[mapping.montantIdx]);
+      else {
+        const d = Math.abs(parseFlexibleAmount(row[mapping.debitIdx])||0);
+        const cr = parseFlexibleAmount(row[mapping.creditIdx])||0;
+        montant = cr - d;
+      }
+      return { date, libelle, montant };
+    }
+    function renderPreview(){
+      const mapping = currentMapping();
+      const previewRows = rows.slice(0,5).map(r=>mapRow(r, mapping));
+      document.getElementById('bkmap-preview').innerHTML = `<table class="compact"><thead><tr><th>Date</th><th>Libellé</th><th class="num-col">Montant</th></tr></thead><tbody>
+        ${previewRows.map(r=>`<tr><td>${r.date?fmtDate(r.date):'<span style="color:var(--brick-dark)">?</span>'}</td><td>${r.libelle}</td><td class="num-col">${r.montant!=null?fmtEUR(r.montant):'<span style="color:var(--brick-dark)">?</span>'}</td></tr>`).join('')}
+      </tbody></table>`;
+    }
+    function renderAmountFields(){
+      const type = document.getElementById('bkmap-type').value;
+      document.getElementById('bkmap-amount-fields').innerHTML = type==='single'
+        ? `<div class="field-row"><div><label>Colonne montant</label><select id="bkmap-montant">${opt(detected.montantIdx>=0?detected.montantIdx:0)}</select></div></div>`
+        : `<div class="field-row"><div><label>Colonne débit</label><select id="bkmap-debit">${opt(detected.debitIdx>=0?detected.debitIdx:0)}</select></div><div><label>Colonne crédit</label><select id="bkmap-credit">${opt(detected.creditIdx>=0?detected.creditIdx:0)}</select></div></div>`;
+      document.getElementById(type==='single' ? 'bkmap-montant' : 'bkmap-debit').addEventListener('change', renderPreview);
+      if(type==='debitcredit') document.getElementById('bkmap-credit').addEventListener('change', renderPreview);
+      renderPreview();
+    }
+    ['bkmap-date','bkmap-libelle'].forEach(id=> document.getElementById(id).addEventListener('change', renderPreview));
+    document.getElementById('bkmap-type').addEventListener('change', renderAmountFields);
+    renderAmountFields();
+
+    document.getElementById('bkImportConfirmBtn').addEventListener('click', ()=>{
+      const mapping = currentMapping();
+      const compte = document.getElementById('bk-import-compte').value;
+      const lignes = rows.map(r=>mapRow(r, mapping)).filter(r=>r.date && r.montant!=null && !isNaN(r.montant))
+        .map(r=> ({ id: uid('bkl'), date:r.date, libelle:r.libelle, montant:r.montant, ecritureId:null, ignored:false }));
+      if(lignes.length===0){ notify('Aucune ligne valide à importer — vérifie le mapping des colonnes.', true); return; }
+      const releve = { id: uid('releve'), compte, dateImport: new Date().toISOString(), nomFichier: bkParsedData.fileName||'releve.csv', lignes };
+      matchReleve(releve);
+      const c = ensureCompta();
+      c.relevesBancaires.push(releve);
+      const rapprochees = releve.lignes.filter(l=>l.ecritureId).length;
+      logActivity(`Relevé bancaire importé (${labelCompteBancaire(compte)}) : ${lignes.length} ligne(s), ${rapprochees} rapprochée(s) automatiquement`);
+      saveData();
+      bkParsedData = null;
+      const fileInput = document.getElementById('bkFileInput');
+      if(fileInput) fileInput.value = '';
+      renderAll();
+      notify(`✓ ${lignes.length} ligne(s) importée(s), ${rapprochees} rapprochée(s) automatiquement.`);
+    });
+  }
+
+  const openReleveDetails = new Set();
+  window.__toggleReleveDetails = function(id){
+    if(openReleveDetails.has(id)) openReleveDetails.delete(id);
+    else openReleveDetails.add(id);
+    renderBanque();
+  };
+
+  window.__creerEcritureDepuisReleve = function(releveId, ligneId){
+    const c = ensureCompta();
+    const releve = c.relevesBancaires.find(r=>r.id===releveId);
+    const ligne = releve && releve.lignes.find(l=>l.id===ligneId);
+    if(!ligne) return;
+    const isEncaissement = ligne.montant > 0;
+    const montantAbs = Math.abs(ligne.montant);
+    openComptaModal(`
+      <h3 style="margin-top:0">Créer une écriture depuis le relevé</h3>
+      <p class="helper">${fmtDate(ligne.date)} — ${ligne.libelle} — ${fmtEUR(ligne.montant)}</p>
+      <div class="field-row">
+        <div><label>Nature</label><select id="bke-compte">
+          ${(isEncaissement ? COMPTES_PRODUIT : COMPTES_CHARGE).map(cc=>`<option value="${cc.compte}">${cc.libelle}</option>`).join('')}
+        </select></div>
+        <div><label>Libellé</label><input id="bke-libelle" value="${(ligne.libelle||'').replace(/"/g,'&quot;')}"></div>
+      </div>
+      <div class="btn-row"><button class="btn" id="bke-submit">Enregistrer l'écriture</button></div>
+    `);
+    document.getElementById('bke-submit').addEventListener('click', ()=>{
+      const compte = document.getElementById('bke-compte').value;
+      const libelle = document.getElementById('bke-libelle').value.trim() || compteDef(compte).libelle;
+      try{
+        const lignes = isEncaissement
+          ? [ { compte: releve.compte, debit: montantAbs, libelle }, { compte, credit: montantAbs, libelle } ]
+          : [ { compte, debit: montantAbs, libelle }, { compte: releve.compte, credit: montantAbs, libelle } ];
+        const ecr = addEcriture({ date: ligne.date, journal:'BQ', libelle, lignes, source:'releve', sourceId: ligne.id });
+        ligne.ecritureId = ecr.id;
+        logActivity(`Écriture créée depuis le relevé bancaire : ${libelle} (${fmtEUR(montantAbs)})`);
+        saveData(); renderAll(); closeComptaModal();
+        notify('Écriture enregistrée et rapprochée.');
+      }catch(err){ notify(err.message, true); }
+    });
+  };
+
+  window.__ignorerLigneReleve = function(releveId, ligneId){
+    const c = ensureCompta();
+    const releve = c.relevesBancaires.find(r=>r.id===releveId);
+    const ligne = releve && releve.lignes.find(l=>l.id===ligneId);
+    if(!ligne) return;
+    ligne.ignored = true;
+    saveData(); renderAll();
+  };
+  window.__annulerIgnorerLigne = function(releveId, ligneId){
+    const c = ensureCompta();
+    const releve = c.relevesBancaires.find(r=>r.id===releveId);
+    const ligne = releve && releve.lignes.find(l=>l.id===ligneId);
+    if(!ligne) return;
+    ligne.ignored = false;
+    saveData(); renderAll();
+  };
+  window.__annulerRapprochementLigne = function(releveId, ligneId){
+    const c = ensureCompta();
+    const releve = c.relevesBancaires.find(r=>r.id===releveId);
+    const ligne = releve && releve.lignes.find(l=>l.id===ligneId);
+    if(!ligne) return;
+    ligne.ecritureId = null;
+    saveData(); renderAll();
+  };
+  window.__supprimerReleve = async function(releveId){
+    if(!(await confirmDialog('Supprimer ce relevé importé ? Les écritures déjà créées ou rapprochées ne sont pas supprimées.'))) return;
+    const c = ensureCompta();
+    c.relevesBancaires = c.relevesBancaires.filter(r=>r.id!==releveId);
+    logActivity('Relevé bancaire supprimé');
+    saveData(); renderAll();
+  };
+
+  function ecrituresNonPointees(compte){
+    const c = ensureCompta();
+    const pointees = new Set();
+    c.relevesBancaires.forEach(r=>{ if(r.compte===compte) r.lignes.forEach(l=>{ if(l.ecritureId) pointees.add(l.ecritureId); }); });
+    return c.ecritures.filter(e=> !pointees.has(e.id) && e.lignes.some(l=>l.compte===compte));
+  }
+
+  function renderBanque(){
+    const soldesWrap = document.getElementById('banqueSoldes');
+    if(soldesWrap){
+      const bal = computeBalance({});
+      const soldeSG = sumSoldePrefix(bal, '512001');
+      const soldeIndy = sumSoldePrefix(bal, '512002');
+      const soldeHisto = sumSoldePrefix(bal, '512000');
+      const soldeTotal = soldeSG + soldeIndy + soldeHisto;
+      soldesWrap.innerHTML = `
+        <div class="kpi-card"><div class="kpi-label">Société Générale</div><div class="kpi-value">${fmtEUR(soldeSG)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Indy</div><div class="kpi-value">${fmtEUR(soldeIndy)}</div></div>
+        <div class="kpi-card positive"><div class="kpi-label">Trésorerie totale</div><div class="kpi-value">${fmtEUR(soldeTotal)}</div></div>
+        ${Math.abs(soldeHisto)>0.01 ? `<div class="kpi-card"><div class="kpi-label">Banque (historique, non affectée)</div><div class="kpi-value">${fmtEUR(soldeHisto)}</div></div>` : ''}
+      `;
+    }
+    const c = ensureCompta();
+    const wrap = document.getElementById('bkImportsList');
+    if(wrap){
+      const releves = [...c.relevesBancaires].sort((a,b)=> b.dateImport.localeCompare(a.dateImport));
+      wrap.innerHTML = releves.length===0 ? '<div class="empty">Aucun relevé importé pour l\'instant.</div>' : releves.map(r=>{
+        const nonTraitees = r.lignes.filter(l=>!l.ecritureId && !l.ignored);
+        const rapprochees = r.lignes.filter(l=>l.ecritureId);
+        const isOpen = openReleveDetails.has(r.id);
+        return `
+        <div class="ecriture-block">
+          <div class="ecriture-head collapsible" onclick="window.__toggleReleveDetails('${r.id}')">
+            <svg class="collapse-chevron ${isOpen?'open':''}" viewBox="0 0 20 20" fill="none"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>${fmtDate(r.dateImport.slice(0,10))} · ${labelCompteBancaire(r.compte)}</span>
+            <span>${r.lignes.length} ligne(s) — ${rapprochees.length} rapprochée(s)${nonTraitees.length?', '+nonTraitees.length+' à traiter':''}</span>
+            <button class="btn danger small" onclick="event.stopPropagation(); window.__supprimerReleve('${r.id}')">Supprimer</button>
+          </div>
+          <div style="padding:12px; ${isOpen?'':'display:none;'}">
+            <table class="compact"><thead><tr><th>Date</th><th>Libellé</th><th class="num-col">Montant</th><th>Statut</th><th></th></tr></thead><tbody>
+              ${r.lignes.map(l=>{
+                let statusHtml, actionsHtml;
+                if(l.ecritureId){
+                  const e = c.ecritures.find(x=>x.id===l.ecritureId);
+                  statusHtml = `<span class="tag-pill paid">Rapprochée${e?' — '+e.libelle:''}</span>`;
+                  actionsHtml = `<button class="btn secondary small" onclick="window.__annulerRapprochementLigne('${r.id}','${l.id}')">Annuler</button>`;
+                } else if(l.ignored){
+                  statusHtml = `<span class="tag-pill" style="background:var(--sage)">Ignorée</span>`;
+                  actionsHtml = `<button class="btn secondary small" onclick="window.__annulerIgnorerLigne('${r.id}','${l.id}')">Reprendre</button>`;
+                } else {
+                  statusHtml = `<span class="tag-pill due">À traiter</span>`;
+                  actionsHtml = `<button class="btn secondary small" onclick="window.__creerEcritureDepuisReleve('${r.id}','${l.id}')">Créer l'écriture</button> <button class="btn danger small" onclick="window.__ignorerLigneReleve('${r.id}','${l.id}')">Ignorer</button>`;
+                }
+                return `<tr><td>${fmtDate(l.date)}</td><td>${l.libelle}</td><td class="num-col">${fmtEUR(l.montant)}</td><td>${statusHtml}</td><td>${actionsHtml}</td></tr>`;
+              }).join('')}
+            </tbody></table>
+          </div>
+        </div>`;
+      }).join('');
+    }
+    const npWrap = document.getElementById('bkNonPointeesWrap');
+    if(npWrap){
+      const nonPointeesSG = ecrituresNonPointees('512001');
+      const nonPointeesIndy = ecrituresNonPointees('512002');
+      const all = [...nonPointeesSG.map(e=>({e,compte:'512001'})), ...nonPointeesIndy.map(e=>({e,compte:'512002'}))].sort((a,b)=> b.e.date.localeCompare(a.e.date));
+      npWrap.innerHTML = all.length===0 ? '<div class="empty">Toutes les écritures bancaires sont pointées.</div>' : `<table class="compact"><thead><tr><th>Date</th><th>Compte</th><th>Libellé</th><th class="num-col">Montant</th></tr></thead><tbody>
+        ${all.map(({e,compte})=>`<tr><td>${fmtDate(e.date)}</td><td>${labelCompteBancaire(compte)}</td><td>${e.libelle}</td><td class="num-col">${fmtEUR(ecritureMontantSurCompte(e, compte))}</td></tr>`).join('')}
+      </tbody></table>`;
+    }
+  }
+
   function renderEcritures(){
     populateYearSelect('ecritures-year');
     populateYearSelect('amort-year');
+    const bankSelect = document.getElementById('compteBancaireSelect');
+    if(bankSelect && document.activeElement !== bankSelect) bankSelect.value = compteBancaireActif();
     const year = document.getElementById('ecritures-year').value;
     const c = ensureCompta();
     const list = c.ecritures.filter(e=>e.exercice===year).sort((a,b)=> b.date.localeCompare(a.date) || b.num-a.num);
@@ -5347,10 +5773,151 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     });
   }
 
+  // ---------- LIASSE FISCALE SIMPLIFIÉE (document préparatoire, pas le CERFA officiel) ----------
+  async function genererLiassePdf(year){
+    const sci = DATA.sci;
+    const cr = computeCompteResultat(year);
+    const bilan = computeBilan(year);
+    const isCalc = calculIS(year);
+    const ech = echeancesIS(year);
+    const c = ensureCompta();
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:'pt', format:'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const marginX = 54, marginTop = 54, marginBottom = 54;
+    const contentWidth = pageWidth - marginX*2;
+    let y = marginTop;
+
+    function ensureSpace(h){ if(y+h > pageHeight-marginBottom){ doc.addPage(); y = marginTop; } }
+    function addText(text, opts={}){
+      const { bold=false, size=9.5, lineHeight=13, gapBefore=0, gapAfter=0, color=0 } = opts;
+      if(!text) return;
+      y += gapBefore;
+      doc.setFont(undefined, bold?'bold':'normal');
+      doc.setFontSize(size);
+      doc.setTextColor(color);
+      const lines = doc.splitTextToSize(text, contentWidth);
+      for(const line of lines){ ensureSpace(lineHeight); doc.text(line, marginX, y); y += lineHeight; }
+      doc.setTextColor(0);
+      y += gapAfter;
+    }
+    function sectionTitle(text){
+      ensureSpace(30);
+      y += 10;
+      doc.setFillColor(241,242,238);
+      doc.rect(marginX, y-11, contentWidth, 16, 'F');
+      doc.setFont(undefined,'bold'); doc.setFontSize(10.5); doc.setTextColor(21,40,69);
+      doc.text(text.toUpperCase(), marginX+4, y);
+      doc.setTextColor(0);
+      y += 16;
+    }
+    function addRow(label, value, opts={}){
+      const { bold=false, size=9, indent=0 } = opts;
+      ensureSpace(13);
+      doc.setFont(undefined, bold?'bold':'normal'); doc.setFontSize(size);
+      doc.text(String(label), marginX+indent, y);
+      const text = typeof value==='number' ? fmtEUR(value) : (value||'');
+      if(text){ const w = doc.getTextWidth(text); doc.text(text, marginX+contentWidth-w, y); }
+      y += 13;
+    }
+    function addSeparator(){ ensureSpace(6); doc.setDrawColor(200); doc.line(marginX, y-4, marginX+contentWidth, y-4); y += 4; }
+
+    const resizedLogo = await resizeImageBase64(window.__logoB64, 200).catch(()=>null);
+    doc.setFont(undefined,'bold'); doc.setFontSize(15);
+    doc.text('Liasse fiscale simplifiée — préparatoire', marginX, y);
+    if(resizedLogo){ try{ doc.addImage('data:image/png;base64,'+resizedLogo,'PNG', pageWidth-marginX-42, marginTop-14, 42, 30); }catch(e){} }
+    y += 18;
+    doc.setFont(undefined,'normal'); doc.setFontSize(9);
+    doc.text(`${sci.name||'[Nom de la SCI]'}${sci.siret?' — SIRET '+sci.siret:''} — Exercice ${year}`, marginX, y);
+    y += 20;
+
+    addText("Ce document rassemble les chiffres nécessaires à la déclaration de résultat (formulaire 2065 et annexes 2033 simplifiées) d'une SCI soumise à l'IS. Ce n'est PAS le formulaire CERFA officiel : vérifie chaque montant et reporte-le toi-même dans la case correspondante du formulaire en vigueur, idéalement avec l'aide d'un expert-comptable.", { size:8.2, color:90, gapAfter:6 });
+
+    sectionTitle('Compte de résultat simplifié (annexe 2033-B)');
+    addRow("Produits d'exploitation", cr.totalProduits, { bold:true });
+    cr.produitsDetail.forEach(p=> addRow(p.libelle, p.montant, { indent:10, size:8.3 }));
+    addSeparator();
+    addRow("Charges d'exploitation", cr.totalCharges, { bold:true });
+    cr.chargesDetail.forEach(ch=> addRow(ch.libelle, ch.montant, { indent:10, size:8.3 }));
+    addSeparator();
+    addRow("Résultat de l'exercice", cr.resultat, { bold:true, size:10 });
+
+    sectionTitle('Bilan simplifié (annexe 2033-A)');
+    addRow('ACTIF', '', { bold:true });
+    addRow('Immobilisations nettes', bilan.actif.immoNet, { indent:10 });
+    addRow('Créances (locataires)', bilan.actif.clients, { indent:10 });
+    addRow('TVA déductible', bilan.actif.tvaDeductible, { indent:10 });
+    addRow('Disponibilités (banque)', bilan.actif.banque, { indent:10 });
+    addRow('Total actif', bilan.actif.total, { bold:true });
+    y += 6;
+    addRow('PASSIF', '', { bold:true });
+    addRow('Capital social et réserves', bilan.passif.capital, { indent:10 });
+    addRow('Emprunts', bilan.passif.emprunts, { indent:10 });
+    addRow('Fournisseurs', bilan.passif.fournisseurs, { indent:10 });
+    addRow('IS à payer', bilan.passif.isAPayer, { indent:10 });
+    addRow('Comptes courants associés', bilan.passif.ccAssocies, { indent:10 });
+    addRow('Dividendes à payer', bilan.passif.dividendesAPayer, { indent:10 });
+    addRow("Résultat de l'exercice", bilan.passif.resultatCumule, { indent:10 });
+    addRow('Total passif', bilan.passif.total, { bold:true });
+
+    if(c.immobilisations.length){
+      sectionTitle('Immobilisations et amortissements (annexe 2033-C)');
+      c.immobilisations.forEach(immo=>{
+        addRow(immo.libelle, '', { bold:true, size:8.5 });
+        addRow('Valeur terrain (non amortissable)', immo.valeurTerrain||0, { indent:10, size:8 });
+        addRow('Valeur amortissable', immo.valeurAmortissable, { indent:10, size:8 });
+        addRow("Durée d'amortissement", immo.dureeAns + ' ans', { indent:10, size:8 });
+      });
+    }
+
+    sectionTitle("Détermination du résultat fiscal et de l'IS (formulaire 2065)");
+    addRow("Résultat comptable de l'exercice", isCalc.resultatComptable);
+    addRow('Réintégrations / déductions fiscales diverses', isCalc.ajustement, { indent:10, size:8.3 });
+    addRow('Résultat fiscal avant imputation des déficits', isCalc.resultatFiscalAvantDeficit, { bold:true });
+    addRow('Déficits antérieurs disponibles', isCalc.deficitDisponible, { indent:10, size:8.3 });
+    addRow('Déficits antérieurs imputés', isCalc.deficitImpute, { indent:10, size:8.3 });
+    addRow("Résultat fiscal (base d'imposition)", isCalc.resultatImposable, { bold:true });
+    addSeparator();
+    if(isCalc.eligibleReduit) addRow(`IS au taux réduit (${(isCalc.tauxReduit*100).toFixed(0)}% jusqu'à ${fmtEUR(isCalc.seuil)})`, isCalc.baseReduite*isCalc.tauxReduit, { indent:10, size:8.3 });
+    addRow(`IS au taux normal (${(isCalc.tauxNormal*100).toFixed(0)}%)`, isCalc.baseNormale*isCalc.tauxNormal, { indent:10, size:8.3 });
+    addRow('Total IS dû au titre de cet exercice', isCalc.is, { bold:true, size:10 });
+
+    sectionTitle('Échéances déclaratives et de paiement');
+    addText(`Déclaration de résultat (formulaire 2065) à déposer avant le ${fmtDate(ech.declaration)}.`, { size:8.5 });
+    if(ech.acomptesDus){
+      addText("Des acomptes d'IS sont dus (IS de l'exercice précédent supérieur à 3 000 €) :", { size:8.5 });
+      ech.acomptes.forEach(a=> addRow(fmtDate(a.date), a.montant, { indent:10, size:8.3 }));
+    }
+
+    addText(`Document généré automatiquement le ${new Date().toLocaleDateString('fr-FR')} — préparatoire, à vérifier avant tout dépôt officiel.`, { size:7.5, color:130, gapBefore:10 });
+
+    return doc.output('blob');
+  }
+
+  document.getElementById('exportLiasseBtn').addEventListener('click', async ()=>{
+    const year = document.getElementById('liasse-year').value;
+    const btn = document.getElementById('exportLiasseBtn');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Génération…';
+    try{
+      const blob = await genererLiassePdf(year);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `liasse-simplifiee-${year}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      logActivity(`Liasse fiscale simplifiée ${year} générée`);
+    }catch(err){ notify('Erreur lors de la génération : ' + (err && err.message || err), true); }
+    finally{ btn.disabled = false; btn.textContent = orig; }
+  });
+
   function renderExportPanel(){
     populateYearSelect('gl-year');
     populateYearSelect('fec-year');
     populateYearSelect('cloture-year');
+    populateYearSelect('liasse-year');
     const year = document.getElementById('cloture-year').value;
     const meta = getExerciceMeta(year);
     const cr = computeCompteResultat(year);
@@ -5376,6 +5943,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     if(!comptaSubnavWired){ renderComptaSubnav(); comptaSubnavWired = true; }
     renderComptaBoard();
     renderEcritures();
+    renderBanque();
     renderImmos();
     renderFactures();
     renderAssociesComptes();
