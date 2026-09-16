@@ -292,13 +292,21 @@
   select[multiple]{ min-height:70px; }
 
   /* ==== Comptabilité ==== */
-  .compta-subnav{ display:flex; flex-wrap:wrap; gap:0; border-bottom:1px solid var(--line); margin-bottom:20px; }
-  .compta-subnav button{
-    font-family:var(--display); font-size:0.72rem; letter-spacing:0.4px; text-transform:uppercase; font-weight:600;
-    background:none; border:none; padding:10px 14px; cursor:pointer; color:var(--ink); opacity:0.55; border-bottom:3px solid transparent;
+  .compta-subnav{
+    display:flex; flex-wrap:nowrap; overflow-x:auto; gap:4px; margin-bottom:24px;
+    padding:5px; background:var(--paper2); border:1px solid var(--line); border-radius:12px;
+    -webkit-overflow-scrolling:touch; scrollbar-width:thin;
   }
-  .compta-subnav button:hover{ opacity:0.9; }
-  .compta-subnav button.active{ opacity:1; border-bottom-color:var(--brick); font-weight:700; }
+  .compta-subnav button{
+    display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap;
+    font-family:var(--display); font-size:0.7rem; letter-spacing:0.3px; text-transform:uppercase; font-weight:600;
+    background:none; border:none; border-radius:8px; padding:9px 13px; cursor:pointer; color:var(--ink); opacity:0.6;
+    transition:opacity .15s ease, background .15s ease, color .15s ease, box-shadow .15s ease;
+  }
+  .compta-subnav button svg{ width:14px; height:14px; flex-shrink:0; }
+  .compta-subnav button:hover{ opacity:1; background:rgba(251,251,248,0.7); }
+  .compta-subnav button.active{ opacity:1; font-weight:700; background:var(--ink); color:var(--white); box-shadow:0 2px 6px rgba(21,40,69,0.28); }
+  .compta-subnav-select{ display:none; margin-bottom:24px; font-weight:700; }
   .compta-sub{ display:none; }
   .compta-sub.active{ display:block; }
   .kpi-card{ background:var(--white); border:1px solid var(--line); border-left:5px solid var(--sage); padding:16px; }
@@ -340,6 +348,8 @@
   @media (max-width:720px){
     nav.top-nav{ display:none; }
     .bottom-nav{ display:flex; }
+    .compta-subnav{ display:none; }
+    .compta-subnav-select{ display:block; }
     main{ padding-bottom:calc(76px + env(safe-area-inset-bottom)); }
 
     input, select, textarea{ font-size:16px; }
@@ -700,17 +710,48 @@
     <p class="section-sub">Comptabilité d'engagement pour SCI à l'IS — écritures, immobilisations, bilan, résultat, IS et export FEC</p>
 
     <div class="compta-subnav" id="comptaSubnav">
-      <button data-sub="board" class="active">Tableau de bord</button>
-      <button data-sub="ecritures">Écritures</button>
-      <button data-sub="immos">Immobilisations</button>
-      <button data-sub="factures">Factures</button>
-      <button data-sub="assoc">Associés &amp; comptes courants</button>
-      <button data-sub="decisions">Décisions (AG)</button>
-      <button data-sub="bilan">Bilan</button>
-      <button data-sub="resultat">Résultat</button>
-      <button data-sub="is">IS &amp; échéances</button>
-      <button data-sub="export">Export &amp; FEC</button>
+      <button data-sub="board" class="active">
+        <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="3" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="3" y="11" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="11" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/></svg>
+        Tableau de bord
+      </button>
+      <button data-sub="ecritures">
+        <svg viewBox="0 0 20 20" fill="none"><rect x="4" y="2.5" width="12" height="15" rx="1" stroke="currentColor" stroke-width="1.5"/><line x1="6.5" y1="6.5" x2="13.5" y2="6.5" stroke="currentColor" stroke-width="1.3"/><line x1="6.5" y1="9.5" x2="13.5" y2="9.5" stroke="currentColor" stroke-width="1.3"/><line x1="6.5" y1="12.5" x2="11" y2="12.5" stroke="currentColor" stroke-width="1.3"/></svg>
+        Écritures
+      </button>
+      <button data-sub="immos">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M3 17V8L10 3l7 5v9" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><line x1="7.5" y1="17" x2="7.5" y2="11" stroke="currentColor" stroke-width="1.3"/><line x1="12.5" y1="17" x2="12.5" y2="11" stroke="currentColor" stroke-width="1.3"/></svg>
+        Immobilisations
+      </button>
+      <button data-sub="factures">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M5 2.5H15V17.5L13 16L11 17.5L9 16L7 17.5L5 16V2.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><line x1="7.3" y1="6.5" x2="12.7" y2="6.5" stroke="currentColor" stroke-width="1.2"/><line x1="7.3" y1="9.5" x2="12.7" y2="9.5" stroke="currentColor" stroke-width="1.2"/></svg>
+        Factures
+      </button>
+      <button data-sub="assoc">
+        <svg viewBox="0 0 20 20" fill="none"><circle cx="7" cy="6.5" r="2.3" stroke="currentColor" stroke-width="1.4"/><circle cx="14" cy="7.5" r="1.9" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 16c0-2.8 2-4.8 4.5-4.8s4.5 2 4.5 4.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M12 12c1.9.3 3.5 1.9 3.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        Associés &amp; comptes courants
+      </button>
+      <button data-sub="decisions">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M4 8l4-4 8 8-4 4-8-8Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><line x1="3" y1="17" x2="9" y2="17" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="10.5" y1="5.5" x2="13" y2="8" stroke="currentColor" stroke-width="1.3"/></svg>
+        Décisions (AG)
+      </button>
+      <button data-sub="bilan">
+        <svg viewBox="0 0 20 20" fill="none"><line x1="10" y1="3" x2="10" y2="15" stroke="currentColor" stroke-width="1.4"/><line x1="3.5" y1="6" x2="16.5" y2="6" stroke="currentColor" stroke-width="1.4"/><path d="M3.5 6L1.5 10.5a2.3 2.3 0 0 0 4.5 0L3.5 6Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M16.5 6l-2 4.5a2.3 2.3 0 0 0 4.5 0L16.5 6Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><line x1="6.5" y1="17" x2="13.5" y2="17" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        Bilan
+      </button>
+      <button data-sub="resultat">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M3 14l4.5-5 3 3L17 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.5 4H17v4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Résultat
+      </button>
+      <button data-sub="is">
+        <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="4" width="14" height="13" rx="1" stroke="currentColor" stroke-width="1.5"/><line x1="3" y1="7.5" x2="17" y2="7.5" stroke="currentColor" stroke-width="1.4"/><line x1="6.5" y1="2.5" x2="6.5" y2="5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="13.5" y1="2.5" x2="13.5" y2="5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        IS &amp; échéances
+      </button>
+      <button data-sub="export">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M10 3v9.5M6.5 9l3.5 3.5L13.5 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.5 14.5V16a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Export &amp; FEC
+      </button>
     </div>
+    <select class="compta-subnav-select" id="comptaSubnavSelect"></select>
 
     <!-- TABLEAU DE BORD -->
     <div class="compta-sub active" id="compta-board">
@@ -4811,13 +4852,28 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
 
   // ---------- RENDER ----------
   function renderComptaSubnav(){
+    const select = document.getElementById('comptaSubnavSelect');
     document.querySelectorAll('#comptaSubnav button').forEach(btn=>{
+      // Sur mobile, la barre à onglets cède la place à ce <select> natif — plus
+      // pratique à l'usage qu'une rangée de pastilles à faire défiler au doigt.
+      const label = btn.textContent.replace(/\s+/g, ' ').trim();
+      const opt = document.createElement('option');
+      opt.value = btn.dataset.sub;
+      opt.textContent = label;
+      if(btn.classList.contains('active')) opt.selected = true;
+      select.appendChild(opt);
+
       btn.addEventListener('click', ()=>{
         document.querySelectorAll('#comptaSubnav button').forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
         document.querySelectorAll('.compta-sub').forEach(v=>v.classList.remove('active'));
         document.getElementById('compta-'+btn.dataset.sub).classList.add('active');
+        select.value = btn.dataset.sub;
       });
+    });
+    select.addEventListener('change', ()=>{
+      const btn = document.querySelector('#comptaSubnav button[data-sub="'+select.value+'"]');
+      if(btn) btn.click();
     });
   }
   let comptaSubnavWired = false;
