@@ -887,6 +887,10 @@
           <label>SIRET</label>
           <input id="sci-siret" placeholder="123 456 789 00012">
         </div>
+        <div>
+          <label>Capital social (€)</label>
+          <input id="sci-capital" type="number" step="1" min="0" placeholder="Ex : 1000">
+        </div>
       </div>
       <div class="field-row">
         <div style="grid-column:1/-1">
@@ -2078,7 +2082,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
 
         <div class="q-body" style="font-size:0.88rem; line-height:1.65;">
           <p><strong>ENTRE LES SOUSSIGNÉS :</strong></p>
-          <p><strong>${sci.name || '[Nom de la SCI]'}</strong>, société civile immobilière${sci.siret ? ', SIRET '+sci.siret : ''}, dont le siège social est situé ${sci.adresse || '[adresse du siège]'}, représentée par ${sci.gerant || '[nom du/des gérant(s)]'}, agissant en qualité de gérant(s) ayant tous pouvoirs à cet effet,<br>
+          <p><strong>${sci.name || '[Nom de la SCI]'}</strong>, société civile immobilière au capital de ${sci.capital ? fmtEUR(sci.capital) : '[capital social]'}${sci.siret ? ', SIRET '+sci.siret : ''}, dont le siège social est situé ${sci.adresse || '[adresse du siège]'}, représentée par ${sci.gerant || '[nom du/des gérant(s)]'}, agissant en qualité de gérant(s) ayant tous pouvoirs à cet effet,<br>
           ci-après dénommée « <strong>le Bailleur</strong> »,</p>
           <p><strong>D'UNE PART,</strong></p>
           <p>ET :</p>
@@ -2236,7 +2240,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     y += 20;
 
     addText('ENTRE LES SOUSSIGNÉS :', { bold:true, gapAfter:6 });
-    addText(`${sci.name || '[Nom de la SCI]'}, société civile immobilière${sci.siret ? ', SIRET '+sci.siret : ''}, dont le siège social est situé ${sci.adresse || '[adresse du siège]'}, représentée par ${sci.gerant || '[nom du/des gérant(s)]'}, agissant en qualité de gérant(s) ayant tous pouvoirs à cet effet, ci-après dénommée « le Bailleur »,`, { gapAfter:6 });
+    addText(`${sci.name || '[Nom de la SCI]'}, société civile immobilière au capital de ${sci.capital ? fmtEUR(sci.capital) : '[capital social]'}${sci.siret ? ', SIRET '+sci.siret : ''}, dont le siège social est situé ${sci.adresse || '[adresse du siège]'}, représentée par ${sci.gerant || '[nom du/des gérant(s)]'}, agissant en qualité de gérant(s) ayant tous pouvoirs à cet effet, ci-après dénommée « le Bailleur »,`, { gapAfter:6 });
     addText("D'UNE PART,", { bold:true, gapAfter:6 });
     addText('ET :', { bold:true, gapAfter:6 });
     addText(`${lease.tenant || '[Nom du locataire]'}${lease.tenantNaissance ? ', né(e) le '+fmtDateLong(lease.tenantNaissance) : ''}${lease.email ? ', joignable à '+lease.email : ''}${lease.phone ? ', tél. '+lease.phone : ''}, ci-après dénommé(e) « le Locataire »,`, { gapAfter:6 });
@@ -2971,6 +2975,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   function renderSettings(){
     document.getElementById('sci-name').value = DATA.sci.name || '';
     document.getElementById('sci-siret').value = DATA.sci.siret || '';
+    document.getElementById('sci-capital').value = DATA.sci.capital || '';
     document.getElementById('sci-adresse').value = DATA.sci.adresse || '';
     document.getElementById('sci-gerant').value = DATA.sci.gerant || '';
     document.getElementById('sci-immeuble').value = DATA.sci.immeuble || '';
@@ -3115,6 +3120,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     DATA.sci = {
       name: document.getElementById('sci-name').value.trim(),
       siret: document.getElementById('sci-siret').value.trim(),
+      capital: Number(document.getElementById('sci-capital').value) || 0,
       adresse: document.getElementById('sci-adresse').value.trim(),
       gerant: document.getElementById('sci-gerant').value.trim(),
       immeuble: document.getElementById('sci-immeuble').value.trim()
