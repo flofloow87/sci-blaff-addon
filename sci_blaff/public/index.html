@@ -788,6 +788,24 @@
         </div>
       </div>
       <div class="panel">
+        <div class="panel-title">Registre des mouvements de parts sociales</div>
+        <p class="helper" style="margin-bottom:12px;">Une SCI doit consigner les cessions de parts entre associés (ou vers un tiers). Ceci ne recalcule pas automatiquement les % ci-dessus — mets-les à jour toi-même après une cession.</p>
+        <div class="field-row">
+          <div><label>Date</label><input type="date" id="mt-date"></div>
+          <div><label>Nombre de parts</label><input type="number" step="1" min="1" id="mt-nombre"></div>
+        </div>
+        <div class="field-row">
+          <div><label>Cédant</label><input id="mt-cedant" placeholder="Nom de l'associé qui cède"></div>
+          <div><label>Cessionnaire</label><input id="mt-cessionnaire" placeholder="Nom du bénéficiaire (associé existant ou nouveau)"></div>
+        </div>
+        <div class="field-row">
+          <div><label>Prix total de la cession (€, optionnel)</label><input type="number" step="0.01" id="mt-prix"></div>
+          <div><label>Notes (optionnel)</label><input id="mt-notes"></div>
+        </div>
+        <div class="btn-row"><button class="btn small" id="addMouvementTitreBtn">+ Enregistrer le mouvement</button></div>
+        <div id="mouvementsTitresList" style="margin-top:14px;"></div>
+      </div>
+      <div class="panel">
         <div class="panel-title">Comptes courants d'associés</div>
         <p class="helper" style="margin-bottom:12px;">Solde créditeur = ce que la SCI doit à l'associé (avances de trésorerie, charges payées de sa poche…).</p>
         <div id="ccAssociesList"></div>
@@ -912,6 +930,52 @@
         <button class="btn" id="saveSettingsBtn">Enregistrer</button>
         <span class="helper" id="settingsSaved" style="align-self:center;"></span>
       </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Documents de la SCI (statuts, Kbis, RIB…)</div>
+      <p class="helper" style="margin-bottom:12px;">Conserve ici les documents officiels de la société — inclus dans la sauvegarde complète comme toutes les autres pièces jointes.</p>
+      <div class="field-row">
+        <div>
+          <label>Type de document</label>
+          <select id="sciDocType">
+            <option value="statuts">Statuts</option>
+            <option value="kbis">Kbis / extrait d'immatriculation</option>
+            <option value="rib">RIB de la SCI</option>
+            <option value="assurance">Attestation d'assurance (immeuble / PNO)</option>
+            <option value="autre">Autre</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row"><div style="grid-column:1/-1" id="sciDocDropzoneWrap"></div></div>
+      <div class="btn-row">
+        <button class="btn small" id="addSciDocBtn">+ Ajouter le document</button>
+        <span class="helper" id="sciDocStatus" style="align-self:center;"></span>
+      </div>
+      <div id="sciDocsList" style="margin-top:14px;"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Charges obligatoires récurrentes</div>
+      <p class="helper" style="margin-bottom:12px;">Taxe foncière, CFE, assurances… suivies ici avec une alerte à l'approche de l'échéance sur le tableau de bord. L'écriture comptable correspondante s'enregistre séparément (Comptabilité → Écritures) le jour du paiement.</p>
+      <div class="field-row">
+        <div>
+          <label>Type</label>
+          <select id="co-type">
+            <option value="taxe_fonciere">Taxe foncière</option>
+            <option value="cfe">CFE (cotisation foncière des entreprises)</option>
+            <option value="assurance">Assurance immeuble / PNO</option>
+            <option value="autre">Autre</option>
+          </select>
+        </div>
+        <div><label>Libellé</label><input id="co-libelle" placeholder="Ex : Taxe foncière 2026"></div>
+      </div>
+      <div class="field-row">
+        <div><label>Montant (€)</label><input type="number" step="0.01" id="co-montant"></div>
+        <div><label>Date d'échéance</label><input type="date" id="co-echeance"></div>
+      </div>
+      <div class="btn-row"><button class="btn small" id="addChargeObligatoireBtn">+ Ajouter</button></div>
+      <div id="chargesObligatoiresList" style="margin-top:14px;"></div>
     </div>
 
     <div class="panel">
@@ -1152,6 +1216,7 @@
     zone.classList.toggle('has-file', !!file);
     if(nameEl) nameEl.textContent = file ? '✓ ' + file.name : '';
   });
+  document.getElementById('sciDocDropzoneWrap').innerHTML = dropzoneHtml('sciDocFileInput');
 
   window.__logoB64 = document.querySelector('header img').src.split(',')[1];
   document.getElementById('loginLogoImg').src = document.querySelector('header img').src;
@@ -2500,6 +2565,16 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     if(diagsWarning.length) alertes.push({ level:'warning', text:`Diagnostic(s) à renouveler bientôt : ${diagsWarning.join(', ')}`, action:{ label:'Voir', view:'apartments' } });
 
     const c = ensureCompta();
+
+    const chargesDanger = [], chargesWarning = [];
+    (c.chargesObligatoires||[]).forEach(x=>{
+      const st = chargeObligatoireStatus(x);
+      if(st==='danger') chargesDanger.push(x.libelle);
+      else if(st==='warning') chargesWarning.push(x.libelle);
+    });
+    if(chargesDanger.length) alertes.push({ level:'danger', text:`Charge(s) obligatoire(s) en retard : ${chargesDanger.join(', ')}`, action:{ label:'Voir', view:'settings' } });
+    if(chargesWarning.length) alertes.push({ level:'warning', text:`Charge(s) obligatoire(s) à régler bientôt : ${chargesWarning.join(', ')}`, action:{ label:'Voir', view:'settings' } });
+
     if(c.ecritures && c.ecritures.length){
       const bal = computeBalance({});
       const fourn = -sumSoldePrefix(bal, '401') - sumSoldePrefix(bal, '404');
@@ -2980,6 +3055,8 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     document.getElementById('sci-gerant').value = DATA.sci.gerant || '';
     document.getElementById('sci-immeuble').value = DATA.sci.immeuble || '';
     document.getElementById('sciNameDisplay').textContent = DATA.sci.name ? DATA.sci.name : 'SCI — 4 lots';
+    renderSciDocs();
+    renderChargesObligatoires();
 
     const bailTplInput = document.getElementById('bailTemplateInput');
     if(bailTplInput && document.activeElement !== bailTplInput){
@@ -3117,14 +3194,16 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   });
 
   document.getElementById('saveSettingsBtn').addEventListener('click', ()=>{
-    DATA.sci = {
+    // Fusionne (au lieu de remplacer) pour ne pas effacer des clés gérées
+    // ailleurs (ex : documents de la SCI) qui ne passent pas par ce formulaire.
+    DATA.sci = Object.assign({}, DATA.sci, {
       name: document.getElementById('sci-name').value.trim(),
       siret: document.getElementById('sci-siret').value.trim(),
       capital: Number(document.getElementById('sci-capital').value) || 0,
       adresse: document.getElementById('sci-adresse').value.trim(),
       gerant: document.getElementById('sci-gerant').value.trim(),
       immeuble: document.getElementById('sci-immeuble').value.trim()
-    };
+    });
     logActivity('Informations SCI modifiées');
     saveData();
     document.getElementById('sciNameDisplay').textContent = DATA.sci.name || 'SCI — 4 lots';
@@ -3132,6 +3211,125 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     msg.textContent = '✓ Enregistré';
     setTimeout(()=> msg.textContent = '', 2000);
   });
+
+  // ---------- DOCUMENTS DE LA SCI (statuts, Kbis, RIB…) ----------
+  const SCI_DOC_LABELS = { statuts:'Statuts', kbis:'Kbis / immatriculation', rib:'RIB', assurance:'Assurance immeuble / PNO', autre:'Autre' };
+  function renderSciDocs(){
+    const wrap = document.getElementById('sciDocsList');
+    if(!wrap) return;
+    const docs = DATA.sci.documents || [];
+    wrap.innerHTML = docs.length===0 ? '<div class="empty">Aucun document enregistré.</div>' : `<table><thead><tr><th>Type</th><th>Fichier</th><th>Ajouté le</th><th></th></tr></thead><tbody>
+      ${docs.map(d=>`<tr>
+        <td>${SCI_DOC_LABELS[d.type]||d.type}</td>
+        <td>${d.attachment ? d.attachment.name : '—'}</td>
+        <td>${fmtDate(d.uploadedAt.slice(0,10))}</td>
+        <td>
+          ${d.attachment ? `<button class="btn secondary small" onclick="window.__downloadAttachment('sci-doc','${d.attachment.id}')">Télécharger</button>` : ''}
+          <button class="btn danger small" onclick="window.__deleteSciDoc('${d.id}')">Supprimer</button>
+        </td>
+      </tr>`).join('')}
+    </tbody></table>`;
+  }
+
+  document.getElementById('addSciDocBtn').addEventListener('click', async ()=>{
+    const type = document.getElementById('sciDocType').value;
+    const input = document.getElementById('sciDocFileInput');
+    const statusEl = document.getElementById('sciDocStatus');
+    const file = input.files[0];
+    statusEl.style.color = '';
+    if(!file){ statusEl.style.color = 'var(--brick-dark)'; statusEl.textContent = "⚠ Choisis d'abord un fichier."; return; }
+    try{
+      const att = await uploadGenericAttachment('sci-doc', file);
+      DATA.sci.documents = DATA.sci.documents || [];
+      DATA.sci.documents.push({ id: uid('scidoc'), type, uploadedAt: new Date().toISOString(), attachment: att });
+      logActivity(`Document SCI ajouté : ${file.name}`);
+      saveData(); renderAll();
+      statusEl.textContent = '✓ Document ajouté.';
+      input.value = '';
+    }catch(err){
+      statusEl.style.color = 'var(--brick-dark)';
+      statusEl.textContent = '⚠ ' + (err && err.message || err);
+    }
+  });
+
+  window.__deleteSciDoc = async function(docId){
+    if(!(await confirmDialog('Supprimer ce document ?'))) return;
+    const doc = (DATA.sci.documents||[]).find(d=>d.id===docId);
+    DATA.sci.documents = (DATA.sci.documents||[]).filter(d=>d.id!==docId);
+    logActivity(doc ? `Document SCI supprimé : ${doc.attachment ? doc.attachment.name : doc.type}` : 'Document SCI supprimé');
+    saveData(); renderAll();
+    if(doc && doc.attachment){ try{ await api('api/attachments/' + doc.attachment.id, { method:'DELETE' }); }catch(e){ /* pièce déjà absente, sans conséquence */ } }
+  };
+
+  // ---------- CHARGES OBLIGATOIRES RÉCURRENTES (taxe foncière, CFE, assurances…) ----------
+  const CHARGE_OBLIGATOIRE_LABELS = { taxe_fonciere:'Taxe foncière', cfe:'CFE', assurance:'Assurance immeuble / PNO', autre:'Autre' };
+  function chargeObligatoireStatus(x){
+    if(x.paid) return 'ok';
+    if(!x.dateEcheance) return 'ok';
+    const days = (new Date(x.dateEcheance) - new Date()) / 86400000;
+    if(days < 0) return 'danger';
+    if(days < 30) return 'warning';
+    return 'ok';
+  }
+  function renderChargesObligatoires(){
+    const wrap = document.getElementById('chargesObligatoiresList');
+    if(!wrap) return;
+    const c = ensureCompta();
+    const items = [...c.chargesObligatoires].sort((a,b)=> (a.dateEcheance||'').localeCompare(b.dateEcheance||''));
+    wrap.innerHTML = items.length===0 ? '<div class="empty">Aucune charge obligatoire enregistrée.</div>' : `<table><thead><tr><th>Type</th><th>Libellé</th><th>Montant</th><th>Échéance</th><th>Statut</th><th></th></tr></thead><tbody>
+      ${items.map(x=>{
+        const st = chargeObligatoireStatus(x);
+        const statusHtml = x.paid ? '<span class="tag-pill paid">Payée</span>'
+          : st==='danger' ? '<span class="tag-pill due">En retard</span>'
+          : st==='warning' ? '<span class="tag-pill" style="background:var(--gold)">Bientôt due</span>'
+          : '<span class="tag-pill" style="background:var(--sage)">À venir</span>';
+        return `<tr>
+          <td>${CHARGE_OBLIGATOIRE_LABELS[x.type]||x.type}</td>
+          <td>${x.libelle}</td>
+          <td class="num-col">${fmtEUR(x.montant)}</td>
+          <td>${x.dateEcheance ? fmtDate(x.dateEcheance) : '—'}</td>
+          <td>${statusHtml}</td>
+          <td>
+            <button class="btn secondary small" onclick="window.__toggleChargePaid('${x.id}')">${x.paid?'Marquer non payée':'Marquer payée'}</button>
+            <button class="btn danger small" onclick="window.__deleteChargeObligatoire('${x.id}')">Supprimer</button>
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody></table>`;
+  }
+
+  document.getElementById('addChargeObligatoireBtn').addEventListener('click', ()=>{
+    const type = document.getElementById('co-type').value;
+    const libelle = document.getElementById('co-libelle').value.trim();
+    const montant = Number(document.getElementById('co-montant').value)||0;
+    const dateEcheance = document.getElementById('co-echeance').value;
+    if(!libelle){ notify('Libellé requis.', true); return; }
+    const c = ensureCompta();
+    c.chargesObligatoires.push({ id: uid('charge'), type, libelle, montant, dateEcheance, paid:false, createdAt:new Date().toISOString() });
+    logActivity(`Charge obligatoire ajoutée : ${libelle}`);
+    saveData(); renderAll();
+    document.getElementById('co-libelle').value = '';
+    document.getElementById('co-montant').value = '';
+    document.getElementById('co-echeance').value = '';
+    notify('Charge obligatoire enregistrée.');
+  });
+
+  window.__toggleChargePaid = function(id){
+    const c = ensureCompta();
+    const item = c.chargesObligatoires.find(x=>x.id===id);
+    if(!item) return;
+    item.paid = !item.paid;
+    logActivity(`Charge obligatoire ${item.paid?'marquée payée':'marquée non payée'} : ${item.libelle}`);
+    saveData(); renderAll();
+  };
+
+  window.__deleteChargeObligatoire = async function(id){
+    if(!(await confirmDialog('Supprimer cette charge obligatoire ?'))) return;
+    const c = ensureCompta();
+    c.chargesObligatoires = c.chargesObligatoires.filter(x=>x.id!==id);
+    logActivity('Charge obligatoire supprimée');
+    saveData(); renderAll();
+  };
 
   document.getElementById('exportBtn').addEventListener('click', ()=>{
     const blob = new Blob([JSON.stringify(DATA, null, 2)], {type:'application/json'});
@@ -3439,6 +3637,8 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     if(!Array.isArray(c.immobilisations)) c.immobilisations = [];
     if(!Array.isArray(c.factures)) c.factures = [];
     if(!Array.isArray(c.decisions)) c.decisions = [];
+    if(!Array.isArray(c.mouvementsTitres)) c.mouvementsTitres = [];
+    if(!Array.isArray(c.chargesObligatoires)) c.chargesObligatoires = [];
     if(!c.exercices || typeof c.exercices !== 'object') c.exercices = {};
     if(typeof c.nextEcritureNum !== 'number') c.nextEcritureNum = 1;
     if(!c.reglages || typeof c.reglages !== 'object') c.reglages = {};
@@ -4718,7 +4918,56 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         ${(DATA.associes||[]).map(a=>`<tr><td>${a.name}</td><td class="num-col">${fmtEUR(dividendeDuAssocie(a.id))}</td></tr>`).join('')}
       </tbody></table>`;
     }
+    renderMouvementsTitres();
+    const mtDateEl = document.getElementById('mt-date');
+    if(mtDateEl && !mtDateEl.value) mtDateEl.value = todayISO();
   }
+
+  // ---------- REGISTRE DES MOUVEMENTS DE PARTS SOCIALES ----------
+  function renderMouvementsTitres(){
+    const wrap = document.getElementById('mouvementsTitresList');
+    if(!wrap) return;
+    const c = ensureCompta();
+    const items = [...c.mouvementsTitres].sort((a,b)=> b.date.localeCompare(a.date));
+    wrap.innerHTML = items.length===0 ? '<div class="empty">Aucun mouvement enregistré.</div>' : `<table class="compact"><thead><tr><th>Date</th><th>Cédant</th><th>Cessionnaire</th><th>Parts</th><th>Prix</th><th></th></tr></thead><tbody>
+      ${items.map(m=>`<tr>
+        <td>${fmtDate(m.date)}</td>
+        <td>${m.cedant}</td>
+        <td>${m.cessionnaire}</td>
+        <td class="num-col">${m.nombreParts}</td>
+        <td class="num-col">${m.prix ? fmtEUR(m.prix) : '—'}</td>
+        <td><button class="btn danger small" onclick="window.__deleteMouvementTitre('${m.id}')">Supprimer</button></td>
+      </tr>`).join('')}
+    </tbody></table>`;
+  }
+
+  document.getElementById('addMouvementTitreBtn').addEventListener('click', ()=>{
+    const date = document.getElementById('mt-date').value;
+    const nombreParts = Number(document.getElementById('mt-nombre').value)||0;
+    const cedant = document.getElementById('mt-cedant').value.trim();
+    const cessionnaire = document.getElementById('mt-cessionnaire').value.trim();
+    const prix = Number(document.getElementById('mt-prix').value)||0;
+    const notes = document.getElementById('mt-notes').value.trim();
+    if(!date || !cedant || !cessionnaire || nombreParts<=0){ notify('Date, cédant, cessionnaire et nombre de parts requis.', true); return; }
+    const c = ensureCompta();
+    c.mouvementsTitres.push({ id: uid('mvttitre'), date, cedant, cessionnaire, nombreParts, prix, notes, createdAt:new Date().toISOString(), createdBy:getWhoAmI()||'' });
+    logActivity(`Mouvement de parts enregistré : ${cedant} → ${cessionnaire} (${nombreParts} parts)`);
+    saveData(); renderAll();
+    document.getElementById('mt-nombre').value = '';
+    document.getElementById('mt-cedant').value = '';
+    document.getElementById('mt-cessionnaire').value = '';
+    document.getElementById('mt-prix').value = '';
+    document.getElementById('mt-notes').value = '';
+    notify('Mouvement enregistré.');
+  });
+
+  window.__deleteMouvementTitre = async function(id){
+    if(!(await confirmDialog('Supprimer ce mouvement ?'))) return;
+    const c = ensureCompta();
+    c.mouvementsTitres = c.mouvementsTitres.filter(m=>m.id!==id);
+    logActivity('Mouvement de parts supprimé');
+    saveData(); renderAll();
+  };
 
   function renderDecisions(){
     populateYearSelect('decision-year');
