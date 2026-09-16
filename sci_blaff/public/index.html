@@ -306,6 +306,7 @@
   .compta-subnav button svg{ width:14px; height:14px; flex-shrink:0; }
   .compta-subnav button:hover{ opacity:1; background:rgba(251,251,248,0.7); }
   .compta-subnav button.active{ opacity:1; font-weight:700; background:var(--ink); color:var(--white); box-shadow:0 2px 6px rgba(21,40,69,0.28); }
+  .compta-subnav-select{ display:none; margin-bottom:24px; font-weight:700; }
   .compta-sub{ display:none; }
   .compta-sub.active{ display:block; }
   .kpi-card{ background:var(--white); border:1px solid var(--line); border-left:5px solid var(--sage); padding:16px; }
@@ -347,6 +348,8 @@
   @media (max-width:720px){
     nav.top-nav{ display:none; }
     .bottom-nav{ display:flex; }
+    .compta-subnav{ display:none; }
+    .compta-subnav-select{ display:block; }
     main{ padding-bottom:calc(76px + env(safe-area-inset-bottom)); }
 
     input, select, textarea{ font-size:16px; }
@@ -748,6 +751,7 @@
         Export &amp; FEC
       </button>
     </div>
+    <select class="compta-subnav-select" id="comptaSubnavSelect"></select>
 
     <!-- TABLEAU DE BORD -->
     <div class="compta-sub active" id="compta-board">
@@ -4848,13 +4852,28 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
 
   // ---------- RENDER ----------
   function renderComptaSubnav(){
+    const select = document.getElementById('comptaSubnavSelect');
     document.querySelectorAll('#comptaSubnav button').forEach(btn=>{
+      // Sur mobile, la barre à onglets cède la place à ce <select> natif — plus
+      // pratique à l'usage qu'une rangée de pastilles à faire défiler au doigt.
+      const label = btn.textContent.replace(/\s+/g, ' ').trim();
+      const opt = document.createElement('option');
+      opt.value = btn.dataset.sub;
+      opt.textContent = label;
+      if(btn.classList.contains('active')) opt.selected = true;
+      select.appendChild(opt);
+
       btn.addEventListener('click', ()=>{
         document.querySelectorAll('#comptaSubnav button').forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
         document.querySelectorAll('.compta-sub').forEach(v=>v.classList.remove('active'));
         document.getElementById('compta-'+btn.dataset.sub).classList.add('active');
+        select.value = btn.dataset.sub;
       });
+    });
+    select.addEventListener('change', ()=>{
+      const btn = document.querySelector('#comptaSubnav button[data-sub="'+select.value+'"]');
+      if(btn) btn.click();
     });
   }
   let comptaSubnavWired = false;
