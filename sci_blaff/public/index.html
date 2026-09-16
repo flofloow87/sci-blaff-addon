@@ -450,7 +450,7 @@
     </div>
     <div class="tag">Gestion des baux &amp; quittances</div>
   </div>
-  <div class="sci-name" id="sciNameDisplay">SCI — 4 lots</div>
+  <div class="sci-name" id="sciNameDisplay">SCI — Registre locatif</div>
 </header>
 
 <nav class="top-nav">
@@ -516,7 +516,7 @@
   <!-- APARTMENTS -->
   <section class="view" id="view-apartments">
     <h2 class="section-title"><span class="section-num">02</span> Appartements</h2>
-    <p class="section-sub">Fiches des 4 lots</p>
+    <p class="section-sub" id="apartmentsSectionSub">Fiches des lots</p>
     <div class="grid4" id="apartmentsGrid"></div>
   </section>
 
@@ -1032,7 +1032,7 @@
           <input id="sci-gerant" placeholder="Noms des gérants">
         </div>
         <div>
-          <label>Adresse de l'immeuble (4 lots)</label>
+          <label>Adresse de l'immeuble</label>
           <input id="sci-immeuble" placeholder="Adresse du bien loué">
         </div>
       </div>
@@ -1089,8 +1089,9 @@
     </div>
 
     <div class="panel">
-      <div class="panel-title">Gestion des 4 lots (numérotation / surface)</div>
+      <div class="panel-title">Gestion des lots (numérotation / surface)</div>
       <div id="aptSettingsList"></div>
+      <div class="btn-row" style="margin-top:6px;"><button class="btn secondary small" id="addApartmentBtn">+ Ajouter un lot</button></div>
     </div>
 
     <div class="panel">
@@ -1592,6 +1593,7 @@
   // et la rend comme un caractère aberrant (ex: "1 400,00" devenait "1/400,00").
   function fmtEUR(n){ return (Number(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2, maximumFractionDigits:2}).replace(/[  ]/g,' ') + ' €'; }
   function fmtDate(d){ if(!d) return '—'; const [y,m,day]=d.split('-'); return `${day}/${m}/${y}`; }
+  function lotsLabel(){ const n = DATA.apartments.length; return `${n} lot${n>1?'s':''}`; }
 
   function activeLeaseForApt(aptId){
     return DATA.leases.find(l => l.aptId === aptId && l.status !== 'terminated');
@@ -1711,6 +1713,8 @@
 
   // ---------- RENDER: APARTMENTS ----------
   function renderApartments(){
+    const sub = document.getElementById('apartmentsSectionSub');
+    if(sub) sub.textContent = `Fiches des ${lotsLabel()}`;
     const grid = document.getElementById('apartmentsGrid');
     grid.innerHTML = '';
     DATA.apartments.forEach(apt=>{
@@ -3179,7 +3183,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     document.getElementById('sci-adresse').value = DATA.sci.adresse || '';
     document.getElementById('sci-gerant').value = DATA.sci.gerant || '';
     document.getElementById('sci-immeuble').value = DATA.sci.immeuble || '';
-    document.getElementById('sciNameDisplay').textContent = DATA.sci.name ? DATA.sci.name : 'SCI — 4 lots';
+    document.getElementById('sciNameDisplay').textContent = DATA.sci.name ? DATA.sci.name : `SCI — ${lotsLabel()}`;
     renderSciDocs();
     renderChargesObligatoires();
 
@@ -3210,6 +3214,9 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
           <label>Valeur d'acquisition (€, optionnel)</label>
           <input type="number" step="0.01" value="${apt.valeurAcquisition||''}" placeholder="Pour calculer le rendement" onchange="window.__updateApt('${apt.id}','valeurAcquisition',this.value)">
         </div>
+        <div>
+          <button class="btn danger small" onclick="window.__removeApartment('${apt.id}')">Supprimer ce lot</button>
+        </div>
       </div>
     `).join('');
   }
@@ -3217,6 +3224,30 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   window.__updateApt = function(id, field, value){
     const apt = DATA.apartments.find(a=>a.id===id);
     if(apt){ apt[field] = value; logActivity(`Lot modifié : ${apt.label}`); saveData(); renderAll(); }
+  };
+
+  document.getElementById('addApartmentBtn').addEventListener('click', ()=>{
+    const n = DATA.apartments.length + 1;
+    const etage = DATA.apartments.length % 2 === 0 ? 'RDC' : 'Étage';
+    const apt = { id: uid('apt'), label: `Lot ${n}`, surface: '', etage };
+    DATA.apartments.push(apt);
+    logActivity(`Lot ajouté : ${apt.label}`);
+    saveData(); renderAll();
+  });
+
+  window.__removeApartment = async function(id){
+    const apt = DATA.apartments.find(a=>a.id===id);
+    if(!apt) return;
+    if(DATA.apartments.length <= 1){ notify('Impossible de supprimer le dernier lot restant.', true); return; }
+    const leases = DATA.leases.filter(l=>l.aptId===id);
+    if(leases.length > 0){
+      notify(`Impossible de supprimer "${apt.label}" : ${leases.length} bail(aux) y sont rattaché(s). Supprime-les d'abord (onglet Baux).`, true);
+      return;
+    }
+    if(!(await confirmDialog(`Supprimer le lot "${apt.label}" ? Cette action est irréversible.`))) return;
+    DATA.apartments = DATA.apartments.filter(a=>a.id!==id);
+    logActivity(`Lot supprimé : ${apt.label}`);
+    saveData(); renderAll();
   };
 
   function renderAccountPanel(){
@@ -3331,7 +3362,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     });
     logActivity('Informations SCI modifiées');
     saveData();
-    document.getElementById('sciNameDisplay').textContent = DATA.sci.name || 'SCI — 4 lots';
+    document.getElementById('sciNameDisplay').textContent = DATA.sci.name || `SCI — ${lotsLabel()}`;
     const msg = document.getElementById('settingsSaved');
     msg.textContent = '✓ Enregistré';
     setTimeout(()=> msg.textContent = '', 2000);
