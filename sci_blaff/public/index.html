@@ -329,6 +329,10 @@
     font-family:var(--mono); font-size:0.75rem; cursor:default; gap:10px; flex-wrap:wrap;
   }
   .ecriture-lignes td{ font-size:0.82rem; }
+  .ecriture-head.collapsible{ cursor:pointer; }
+  .ecriture-head.collapsible:hover{ background:var(--line); }
+  .collapse-chevron{ width:13px; height:13px; flex-shrink:0; color:var(--sage); transition:transform .15s ease; }
+  .collapse-chevron.open{ transform:rotate(90deg); }
   .free-entry-row{ display:grid; grid-template-columns:2fr 2fr 1fr 1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
   @media (max-width:720px){ .free-entry-row{ grid-template-columns:1fr 1fr; } }
 
@@ -5028,21 +5032,35 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     </tbody></table>`;
   }
 
+  // Les factures restent repliées par défaut (seul l'essentiel — date, fournisseur,
+  // objet, montant — apparaît dans l'en-tête) ; l'ensemble ouvert survit aux
+  // re-rendus (poll périodique, autre action) grâce à ce Set tenu à part du DOM.
+  const openFactureDetails = new Set();
+  window.__toggleFactureDetails = function(id){
+    if(openFactureDetails.has(id)) openFactureDetails.delete(id);
+    else openFactureDetails.add(id);
+    renderFactures();
+  };
+
   function renderFactures(){
     const wrap = document.getElementById('facturesList');
     if(!wrap) return;
     const c = ensureCompta();
     const factures = [...c.factures].sort((a,b)=> b.date.localeCompare(a.date));
     if(factures.length===0){ wrap.innerHTML = '<div class="empty">Aucune facture enregistrée pour l\'instant.</div>'; return; }
-    wrap.innerHTML = factures.map(f=> `
+    wrap.innerHTML = factures.map(f=> {
+      const isOpen = openFactureDetails.has(f.id);
+      return `
       <div class="ecriture-block">
-        <div class="ecriture-head">
+        <div class="ecriture-head collapsible" onclick="window.__toggleFactureDetails('${f.id}')">
+          <svg class="collapse-chevron ${isOpen?'open':''}" viewBox="0 0 20 20" fill="none"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>${fmtDate(f.date)} · ${f.fournisseur || 'Fournisseur non renseigné'}</span>
           <span>${f.objet} — ${fmtEUR(f.montant)}</span>
           <span class="badge ${f.nature==='immobilisation'?'cloture':'ouvert'}">${f.nature==='immobilisation'?'Immobilisée':'Charge'}</span>
-          <button class="btn danger small" onclick="window.__deleteFacture('${f.id}')">Supprimer</button>
+          ${f.attachments.length ? `<span class="helper" style="margin:0;">📎 ${f.attachments.length}</span>` : ''}
+          <button class="btn danger small" onclick="event.stopPropagation(); window.__deleteFacture('${f.id}')">Supprimer</button>
         </div>
-        <div style="padding:12px;">
+        <div style="padding:12px; ${isOpen ? '' : 'display:none;'}">
           ${f.attachments.length===0 ? '<div class="empty">Aucun justificatif joint.</div>' : `<table class="compact"><tbody>
             ${f.attachments.map(a=>`<tr><td>${a.name}</td><td>${fmtDate(a.uploadedAt.slice(0,10))}</td><td>
               <button class="btn secondary small" onclick="window.__downloadAttachment('${f.id}','${a.id}')">Télécharger</button>
@@ -5057,7 +5075,8 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
           </div>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   function renderAssociesComptes(){
