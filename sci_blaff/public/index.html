@@ -98,6 +98,23 @@
   }
   nav button:hover{opacity:0.9;}
   nav button.active{opacity:1; border-bottom-color:var(--brick); font-weight:700;}
+  /* Le rang d'onglets (nav.top-nav) est remplacé par un menu déroulant, y compris
+     sur ordinateur : plus lisible qu'une rangée d'onglets qui défile horizontalement. */
+  nav.top-nav{ display:none; }
+  .top-nav-select{
+    display:block; width:100%; max-width:1100px; margin:14px auto; box-sizing:border-box;
+    padding:13px 40px 13px 18px;
+    font-family:var(--display); font-size:0.82rem; font-weight:700; letter-spacing:0.4px; text-transform:uppercase;
+    color:var(--ink); background-color:var(--white);
+    border:1px solid var(--line); border-radius:12px; cursor:pointer;
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5.5 8L10 12.5L14.5 8' stroke='%23dd8330' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 16px center; background-size:15px;
+    box-shadow:0 2px 10px rgba(21,40,69,0.06);
+    transition:border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .top-nav-select:hover{ border-color:var(--brick); }
+  .top-nav-select:focus{ outline:none; border-color:var(--brick); box-shadow:0 0 0 3px rgba(221,131,48,0.15); }
 
   /* ==== Bottom nav (mobile app-style) ==== */
   .bottom-nav{
@@ -268,7 +285,7 @@
   .q-sign .line{ margin-top:38px; border-top:1px solid var(--ink); width:180px; padding-top:4px; font-family:var(--mono); font-size:0.7rem; color:var(--sage);}
 
   @media print{
-    header, nav, .bottom-nav, .no-print{ display:none !important; }
+    header, nav, .bottom-nav, .top-nav-select, .no-print{ display:none !important; }
     body{ background:white; }
     .quittance-preview{ border:none; margin:0; max-width:100%; }
     main{ padding:0; }
@@ -365,7 +382,7 @@
 
   /* ==== Mobile app-style ergonomics (iPhone) ==== */
   @media (max-width:720px){
-    nav.top-nav{ display:none; }
+    .top-nav-select{ display:none; }
     .bottom-nav{ display:flex; }
     .compta-subnav{ display:none; }
     .compta-subnav-select{ display:block; }
@@ -481,6 +498,15 @@
   <button data-view="settings">06 · SCI</button>
 </nav>
 
+<select class="top-nav-select" id="topNavSelect" aria-label="Navigation principale">
+  <option value="dashboard">01 · Tableau de bord</option>
+  <option value="apartments">02 · Appartements</option>
+  <option value="leases">03 · Baux</option>
+  <option value="quittances">04 · Quittances</option>
+  <option value="accounting">05 · Comptabilité</option>
+  <option value="settings">06 · SCI</option>
+</select>
+
 <nav class="bottom-nav">
   <button data-view="dashboard" class="active">
     <svg viewBox="0 0 20 20" fill="none"><path d="M3 9L10 3L17 9V16.5C17 16.78 16.78 17 16.5 17H12V12H8V17H3.5C3.22 17 3 16.78 3 16.5V9Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
@@ -524,6 +550,17 @@
     <div class="building-legend">
       <span><i class="dot occ"></i> Occupé</span>
       <span><i class="dot vac"></i> Vacant</span>
+    </div>
+
+    <div class="charts-grid" style="margin-top:24px;">
+      <div class="panel">
+        <div class="panel-title">Loyers encaissés — 12 derniers mois</div>
+        <div class="chart-wrap"><canvas id="chartDashLoyers"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Occupation des lots</div>
+        <div class="chart-wrap" id="chartDashOccupationWrap"><canvas id="chartDashOccupation"></canvas></div>
+      </div>
     </div>
 
     <div class="panel" style="margin-top:24px;">
@@ -1625,8 +1662,14 @@
       btn.classList.add('active');
       document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
       document.getElementById('view-'+btn.dataset.view).classList.add('active');
+      const topNavSelect = document.getElementById('topNavSelect');
+      if(topNavSelect) topNavSelect.value = btn.dataset.view;
       if(btn.dataset.view==='dashboard') renderDashboard();
     });
+  });
+  document.getElementById('topNavSelect').addEventListener('change', (e)=>{
+    const btn = document.querySelector('nav.top-nav button[data-view="'+e.target.value+'"]');
+    if(btn) btn.click();
   });
 
   function renderBuildingElevation(){
@@ -1718,6 +1761,7 @@
   function renderDashboard(){
     renderBuildingElevation();
     renderAlertes();
+    renderDashboardCharts();
 
     const recentWrap = document.getElementById('recentQuittances');
     const recent = [...DATA.quittances].sort((a,b)=> b.createdAt.localeCompare(a.createdAt)).slice(0,5);
@@ -1727,6 +1771,63 @@
       recentWrap.innerHTML = `<table><thead><tr><th>Locataire</th><th>Mois</th><th>Montant</th><th>Statut</th></tr></thead><tbody>
         ${recent.map(q=>`<tr><td>${q.tenant}</td><td>${q.monthLabel}</td><td>${fmtEUR(q.total)}</td><td><span class="tag-pill ${q.datePaid?'paid':'due'}">${q.datePaid?'Payée':'En attente'}</span></td></tr>`).join('')}
       </tbody></table>`;
+    }
+  }
+
+  function computeLoyersMensuel12(){
+    const now = new Date();
+    const months = [];
+    for(let i=11;i>=0;i--){
+      const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+      months.push({ key: `${d.getFullYear()}-${pad2(d.getMonth()+1)}`, label: MOIS_COURTS[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2) });
+    }
+    return months.map(m => ({
+      label: m.label,
+      montant: DATA.quittances.filter(q => q.month === m.key && q.datePaid).reduce((s,q)=> s + (Number(q.total)||0), 0)
+    }));
+  }
+
+  function renderDashboardCharts(){
+    if(typeof Chart === 'undefined') return;
+    const loyers = computeLoyersMensuel12();
+    renderChart('chartDashLoyers', {
+      type: 'bar',
+      data: {
+        labels: loyers.map(m=>m.label),
+        datasets: [{ label: 'Loyers encaissés', data: loyers.map(m=>m.montant), backgroundColor: CHART_COLORS.produits, borderRadius: 4, maxBarThickness: 26 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx)=> ` ${fmtEUR(ctx.parsed.y)}` } }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#57646b', font: { family: 'IBM Plex Mono', size: 10 } } },
+          y: { grid: { color: '#e2e6e1' }, ticks: { color: '#57646b', font: { family: 'IBM Plex Mono', size: 11 }, callback: (v)=> fmtEUR(v) } }
+        }
+      }
+    });
+
+    const wrap = document.getElementById('chartDashOccupationWrap');
+    if(wrap){
+      const occ = DATA.apartments.filter(a => activeLeaseForApt(a.id)).length;
+      const vac = DATA.apartments.length - occ;
+      if(!document.getElementById('chartDashOccupation')){ wrap.innerHTML = '<canvas id="chartDashOccupation"></canvas>'; }
+      renderChart('chartDashOccupation', {
+        type: 'doughnut',
+        data: {
+          labels: ['Occupé', 'Vacant'],
+          datasets: [{ data: [occ, vac], backgroundColor: [CHART_COLORS.produits, '#c1c9c2'], borderColor: '#fbfbf8', borderWidth: 2 }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { color: '#152845', font: { family: 'Space Grotesk', size: 11 }, usePointStyle: true, boxHeight: 8, padding: 12 } },
+            tooltip: { callbacks: { label: (ctx)=> ` ${ctx.label} : ${ctx.parsed} lot${ctx.parsed>1?'s':''}` } }
+          }
+        }
+      });
     }
   }
 
