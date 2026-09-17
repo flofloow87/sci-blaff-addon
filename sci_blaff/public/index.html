@@ -459,6 +459,13 @@
     .btn-row{ gap:8px; }
     table.compact th, table.compact td{ padding:9px 8px; }
 
+    /* Les tableaux (quittances, baux, factures, écritures…) ont souvent plus de
+       colonnes — et de boutons d'action par ligne — que ne le permet un écran de
+       téléphone. Plutôt que de laisser le tableau étirer toute la page
+       horizontalement, il devient défilable dans sa propre carte : la page, elle,
+       ne bouge plus. */
+    table{ display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap; }
+
     .modal-bg{
       align-items:flex-end; justify-content:stretch; padding:0;
     }
