@@ -93,6 +93,9 @@
     display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;
     max-width:1100px; margin:0 auto;
   }
+  /* Le PNG du logo a un fond blanc opaque en dur : sans arrondi, ce carré blanc
+     tranche violemment sur le thème sombre. */
+  .brand img{ border-radius:10px; }
   .brand h1{
     margin:0; font-size:1.85rem; letter-spacing:-0.3px; font-weight:700; font-family:var(--display);
   }
@@ -465,8 +468,68 @@
       border-radius:16px 16px 0 0;
       padding:18px 18px calc(20px + env(safe-area-inset-bottom));
       animation:sheet-up .18s ease-out;
+      position:relative;
+    }
+    /* Poignée de la feuille du bas, comme les sheets iOS. */
+    .modal::before{
+      content:''; display:block; width:36px; height:5px; border-radius:3px;
+      background:var(--line); margin:0 auto 14px;
     }
     @keyframes sheet-up{ from{ transform:translateY(24px); opacity:0.6; } to{ transform:translateY(0); opacity:1; } }
+
+    /* ==== Habillage "iOS 17" — mobile uniquement : le desktop garde son identité
+       "registre papier". Sur un vrai iPhone, la pile de polices système restitue
+       littéralement SF Pro (déjà installée par iOS, sans embarquer aucun fichier de
+       police) ; ailleurs elle se replie sur les polices de marque habituelles. Le
+       bandeau dégradé du header et les couleurs brique/or restent les seuls fils
+       conducteurs avec le reste de l'app. */
+    :root{
+      --display: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Space Grotesk', 'Futura', sans-serif;
+      --serif: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Source Serif 4', Georgia, serif;
+      --mono: ui-monospace, 'SF Mono', 'IBM Plex Mono', monospace;
+    }
+
+    /* Grand titre de section, dans l'esprit des "large titles" iOS. */
+    h2.section-title{ font-size:1.9rem; font-weight:700; letter-spacing:-0.4px; }
+    .section-sub{ font-size:0.8rem; }
+
+    /* Cartes façon liste groupée iOS : coins arrondis, plus de bordure dure — la
+       distinction de fond --surface / --paper (déjà utilisée par le thème sombre)
+       suffit à détacher visuellement la carte de l'arrière-plan, dans les deux thèmes. */
+    .panel, .ecriture-block, .building-wrap, .log-entry, .quittance-preview, .compta-note, .mode-notice{
+      border-radius:16px; border-color:transparent;
+      box-shadow:0 1px 2px rgba(0,0,0,0.05);
+    }
+    .apt-card, .kpi-card{ border-radius:16px; box-shadow:0 1px 2px rgba(0,0,0,0.05); }
+    .dropzone{ border-radius:16px; }
+
+    /* Champs de saisie "pleins" plutôt qu'encadrés, comme les listes iOS. */
+    input, select, textarea{
+      border:none; background:var(--paper2); border-radius:12px; padding:12px 14px;
+    }
+    input:focus, select:focus, textarea:focus{
+      outline:none; background:var(--surface); box-shadow:0 0 0 2px rgba(221,131,48,0.35);
+    }
+
+    /* Boutons pleins et arrondis, avec un léger retour au toucher. */
+    .btn{ border-radius:14px; border-width:0; }
+    .btn.secondary{ border:1.5px solid var(--ink); }
+    .btn.small{ border-radius:10px; }
+    .btn:active{ transform:scale(0.96); opacity:0.88; }
+
+    /* Pastilles en forme de capsule (tags, badges, statuts). */
+    .tag-pill, .badge, .diag-status{ border-radius:999px; padding-left:10px; padding-right:10px; }
+
+    .compta-subnav-select{ border-radius:14px; }
+
+    .bottom-nav{ backdrop-filter:blur(24px) saturate(1.8); -webkit-backdrop-filter:blur(24px) saturate(1.8); }
+    .bottom-nav button.active{ border-radius:14px; }
+
+    /* Bouton de fermeture en pastille grise, comme le bouton de fermeture des sheets iOS. */
+    .modal-close{
+      width:30px; height:30px; border-radius:50%; background:var(--paper2); color:var(--sage);
+      display:flex; align-items:center; justify-content:center; font-size:1rem;
+    }
   }
 
   .alerte-item{
