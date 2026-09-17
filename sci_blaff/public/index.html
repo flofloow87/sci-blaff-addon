@@ -251,6 +251,12 @@
   .panel{ background:var(--surface); border:1px solid var(--line); padding:22px; margin-bottom:22px; }
   .panel-title{ font-family:var(--display); font-weight:600; text-transform:uppercase; font-size:0.78rem; letter-spacing:1px; color:var(--brick-dark); margin:0 0 16px; border-bottom:1px dashed var(--line); padding-bottom:10px;}
   .field-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:14px;}
+  /* Sans ça, une cellule de la grille ne peut jamais rétrécir sous la largeur
+     intrinsèque de son contenu (comportement par défaut de CSS Grid) : un champ
+     type="date"/type="month" a une largeur native assez large (pour afficher le
+     format de date localisé) et déborde alors de sa colonne — visible surtout sur
+     petit écran où la grille passe à une seule colonne étroite. */
+  .field-row > div{ min-width:0; }
   label{ display:block; font-family:var(--mono); font-size:0.68rem; text-transform:uppercase; letter-spacing:1px; color:var(--sage); margin-bottom:5px;}
   input, select, textarea{
     width:100%; padding:9px 10px; border:1px solid var(--line); background:var(--paper);
