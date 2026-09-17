@@ -546,6 +546,11 @@
       <div id="alertesList"></div>
     </div>
 
+    <div class="panel" id="anomaliesPanel" style="display:none;">
+      <div class="panel-title">🔍 Anomalies détectées</div>
+      <div id="anomaliesList"></div>
+    </div>
+
     <div class="building-wrap" id="buildingElevationWrap"></div>
     <div class="building-legend">
       <span><i class="dot occ"></i> Occupé</span>
@@ -1048,6 +1053,12 @@
         <p class="helper" style="margin-bottom:12px;">Document préparatoire regroupant, pour l'exercice choisi, les chiffres nécessaires à la déclaration de résultat (formulaire 2065 et annexes simplifiées 2033). <strong>Ce n'est pas le formulaire CERFA officiel</strong> — reporte ces montants dans les bonnes cases toi-même ou fais-le vérifier par un expert-comptable avant tout dépôt.</p>
         <div class="field-row"><div><label>Exercice</label><select id="liasse-year"></select></div></div>
         <div class="btn-row"><button class="btn" id="exportLiasseBtn">Générer la liasse simplifiée (PDF)</button></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">🤖 Rapport de gestion annuel (IA)</div>
+        <p class="helper" style="margin-bottom:12px;">Texte de synthèse pour l'assemblée générale, rédigé par IA à partir des chiffres réels de l'exercice choisi (activité locative, situation financière, faits marquants, points de vigilance, perspectives). L'IA n'invente aucun chiffre — mais <strong>relis le rapport avant de le présenter</strong> : il peut manquer du contexte que seuls les chiffres ne peuvent pas exprimer. Nécessite la clé API Anthropic (options de l'add-on).</p>
+        <div class="field-row"><div><label>Exercice</label><select id="rapport-gestion-year"></select></div></div>
+        <div class="btn-row"><button class="btn" id="exportRapportGestionBtn">Générer le rapport de gestion (PDF)</button></div>
       </div>
       <div class="panel">
         <div class="panel-title">Journal d'activité</div>
@@ -1761,6 +1772,7 @@
   function renderDashboard(){
     renderBuildingElevation();
     renderAlertes();
+    renderAnomalies();
     renderDashboardCharts();
 
     const recentWrap = document.getElementById('recentQuittances');
@@ -2856,6 +2868,85 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     panel.style.display='block';
     list.innerHTML = alertes.map(a=>`
       <div class="alerte-item ${a.level}">
+        <span>${a.text}</span>
+        ${a.action ? `<button class="alerte-action" onclick="window.__goToView('${a.action.view}')">${a.action.label} →</button>` : ''}
+      </div>
+    `).join('');
+  }
+
+  // ---------- DÉTECTION D'ANOMALIES ----------
+  // Analyse purement locale (aucun appel IA) : plus fiable et instantanée pour ce
+  // type de vérification numérique que de faire relire les chiffres par un modèle.
+  function computeAnomalies(){
+    const anomalies = [];
+    const c = ensureCompta();
+
+    // Factures potentiellement en double : même fournisseur, même montant (± 1 centime),
+    // dates à moins de 10 jours d'écart. Fenêtre volontairement courte : une vraie saisie
+    // en double est en général ressaisie à quelques jours d'intervalle, alors qu'une charge
+    // récurrente mensuelle (assurance, abonnement) au même montant tombe ~30 jours plus tard
+    // et ne doit pas être signalée à tort.
+    const factures = [...(c.factures||[])].sort((a,b)=> a.date.localeCompare(b.date));
+    for(let i=0;i<factures.length;i++){
+      for(let j=i+1;j<factures.length;j++){
+        const a = factures[i], b = factures[j];
+        if(!a.fournisseur || !b.fournisseur) continue;
+        if(a.fournisseur.trim().toLowerCase() !== b.fournisseur.trim().toLowerCase()) continue;
+        if(Math.abs(Number(a.montant) - Number(b.montant)) > 0.01) continue;
+        const jours = Math.abs(new Date(b.date) - new Date(a.date)) / 86400000;
+        if(jours <= 10){
+          anomalies.push({ text:`Facture potentiellement en double : « ${a.objet} » — ${a.fournisseur} — ${fmtEUR(a.montant)} (${fmtDate(a.date)} et ${fmtDate(b.date)})`, action:{ label:'Voir', view:'accounting' } });
+        }
+      }
+    }
+
+    // Charges inhabituelles : montant très supérieur à la moyenne historique du même compte.
+    if(c.ecritures && c.ecritures.length){
+      const parCompte = {};
+      c.ecritures.forEach(e=>{
+        (e.lignes||[]).forEach(l=>{
+          if(!l.compte || !l.compte.startsWith('6') || l.compte.startsWith('68')) return;
+          const montant = Number(l.debit) || 0;
+          if(montant<=0) return;
+          if(!parCompte[l.compte]) parCompte[l.compte] = [];
+          parCompte[l.compte].push({ montant, date:e.date, libelle:e.libelle });
+        });
+      });
+      Object.entries(parCompte).forEach(([compte, mvts])=>{
+        if(mvts.length < 4) return;
+        mvts.forEach((m, idx)=>{
+          const autres = mvts.filter((_,i)=>i!==idx).map(x=>x.montant);
+          const moyenne = autres.reduce((s,x)=>s+x,0) / autres.length;
+          if(moyenne > 20 && m.montant > moyenne * 2.5){
+            anomalies.push({ text:`Charge inhabituelle sur le compte ${compte} (${compteDef(compte).libelle}) : ${fmtEUR(m.montant)} le ${fmtDate(m.date)} — moyenne habituelle ${fmtEUR(moyenne)}`, action:{ label:'Voir', view:'accounting' } });
+          }
+        });
+      });
+    }
+
+    // Écart entre le montant d'une quittance et le loyer + charges actuel du bail
+    // (peut signaler une erreur de saisie ou un bail modifié sans régénérer les quittances).
+    DATA.quittances.forEach(q=>{
+      const lease = DATA.leases.find(l=>l.id===q.leaseId);
+      if(!lease) return;
+      const attendu = Number(lease.loyer) + Number(lease.charges||0);
+      if(Math.abs(Number(q.total) - attendu) > 0.5){
+        anomalies.push({ text:`Écart de montant : quittance ${q.tenant} — ${q.monthLabel} (${fmtEUR(q.total)}) diffère du loyer actuel du bail (${fmtEUR(attendu)})`, action:{ label:'Voir', view:'quittances' } });
+      }
+    });
+
+    return anomalies;
+  }
+
+  function renderAnomalies(){
+    const panel = document.getElementById('anomaliesPanel');
+    const list = document.getElementById('anomaliesList');
+    if(!panel || !list) return;
+    const anomalies = computeAnomalies();
+    if(anomalies.length===0){ panel.style.display='none'; return; }
+    panel.style.display='block';
+    list.innerHTML = anomalies.map(a=>`
+      <div class="alerte-item warning">
         <span>${a.text}</span>
         ${a.action ? `<button class="alerte-action" onclick="window.__goToView('${a.action.view}')">${a.action.label} →</button>` : ''}
       </div>
@@ -6064,11 +6155,118 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     finally{ btn.disabled = false; btn.textContent = orig; }
   });
 
+  // ---------- RAPPORT DE GESTION ANNUEL (IA) ----------
+  function computeRapportGestionData(year){
+    const cr = computeCompteResultat(year);
+    const bilan = computeBilan(year);
+    const occ = DATA.apartments.filter(a=>activeLeaseForApt(a.id)).length;
+    const quittancesAnnee = DATA.quittances.filter(q=>q.month && q.month.startsWith(String(year)));
+    return {
+      exercice: year,
+      nombreDeLots: DATA.apartments.length,
+      lotsOccupes: occ,
+      lotsVacants: DATA.apartments.length - occ,
+      loyersEncaisses: quittancesAnnee.filter(q=>q.datePaid).reduce((s,q)=> s+(Number(q.total)||0), 0),
+      loyersImpayes: quittancesAnnee.filter(q=>!q.datePaid).reduce((s,q)=> s+(Number(q.total)||0), 0),
+      produitsExploitation: cr.totalProduits,
+      chargesExploitation: cr.totalCharges,
+      resultatExercice: cr.resultat,
+      totalActif: bilan.actif.total,
+      totalPassif: bilan.passif.total,
+      tresorerieBanque: bilan.actif.banque,
+      emprunts: bilan.passif.emprunts,
+      alertesEnCours: computeAlertes().map(a=>a.text),
+      anomaliesDetectees: computeAnomalies().map(a=>a.text)
+    };
+  }
+
+  async function genererRapportGestionPdf(year){
+    const sci = DATA.sci;
+    const donnees = computeRapportGestionData(year);
+    const result = await api('api/rapport-gestion', { method:'POST', body: JSON.stringify({ annee: year, donnees }) });
+    const rapportText = result.rapport;
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:'pt', format:'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const marginX = 54, marginTop = 54, marginBottom = 54;
+    const contentWidth = pageWidth - marginX*2;
+    let y = marginTop;
+
+    function ensureSpace(h){ if(y+h > pageHeight-marginBottom){ doc.addPage(); y = marginTop; } }
+    function addText(text, opts={}){
+      const { bold=false, size=9.5, lineHeight=13, gapBefore=0, gapAfter=0, color=0 } = opts;
+      if(!text) return;
+      y += gapBefore;
+      doc.setFont(undefined, bold?'bold':'normal');
+      doc.setFontSize(size);
+      doc.setTextColor(color);
+      const lines = doc.splitTextToSize(text, contentWidth);
+      for(const line of lines){ ensureSpace(lineHeight); doc.text(line, marginX, y); y += lineHeight; }
+      doc.setTextColor(0);
+      y += gapAfter;
+    }
+    function sectionTitle(text){
+      ensureSpace(30);
+      y += 10;
+      doc.setFillColor(241,242,238);
+      doc.rect(marginX, y-11, contentWidth, 16, 'F');
+      doc.setFont(undefined,'bold'); doc.setFontSize(10.5); doc.setTextColor(21,40,69);
+      doc.text(text.toUpperCase(), marginX+4, y);
+      doc.setTextColor(0);
+      y += 16;
+    }
+
+    const resizedLogo = await resizeImageBase64(window.__logoB64, 200).catch(()=>null);
+    doc.setFont(undefined,'bold'); doc.setFontSize(15);
+    doc.text('Rapport de gestion annuel', marginX, y);
+    if(resizedLogo){ try{ doc.addImage('data:image/png;base64,'+resizedLogo,'PNG', pageWidth-marginX-42, marginTop-14, 42, 30); }catch(e){} }
+    y += 18;
+    doc.setFont(undefined,'normal'); doc.setFontSize(9);
+    doc.text(`${sci.name||'[Nom de la SCI]'}${sci.siret?' — SIRET '+sci.siret:''} — Exercice ${year}`, marginX, y);
+    y += 20;
+
+    addText("Document rédigé automatiquement par IA à partir des chiffres réels de l'exercice, pour préparer l'assemblée générale annuelle. Relis-le avant présentation : vérifie chaque montant et complète les points de contexte que les chiffres seuls ne peuvent pas exprimer.", { size:8.2, color:90, gapAfter:6 });
+
+    // Découpe le texte généré en sections (titres en MAJUSCULES sur leur propre ligne,
+    // conformément à la consigne donnée au modèle) sans logique métier dupliquée ici :
+    // tout le contenu vient tel quel de la réponse IA.
+    const lignes = rapportText.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+    const estUnTitre = (l) => l === l.toUpperCase() && /[A-ZÀ-Ü]/.test(l) && l.length < 60;
+    lignes.forEach(ligne=>{
+      if(estUnTitre(ligne)) sectionTitle(ligne);
+      else addText(ligne, { size:9.5, lineHeight:13, gapAfter:6 });
+    });
+
+    addText(`Rapport généré par IA le ${new Date().toLocaleDateString('fr-FR')} — à vérifier et compléter avant présentation à l'assemblée générale.`, { size:7.5, color:130, gapBefore:14 });
+
+    return doc.output('blob');
+  }
+
+  document.getElementById('exportRapportGestionBtn').addEventListener('click', async ()=>{
+    const year = document.getElementById('rapport-gestion-year').value;
+    const btn = document.getElementById('exportRapportGestionBtn');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Génération en cours (IA)…';
+    try{
+      const blob = await genererRapportGestionPdf(year);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `rapport-gestion-${year}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      logActivity(`Rapport de gestion ${year} généré (IA)`);
+    }catch(err){ notify('Erreur lors de la génération : ' + (err && err.message || err), true); }
+    finally{ btn.disabled = false; btn.textContent = orig; }
+  });
+
   function renderExportPanel(){
     populateYearSelect('gl-year');
     populateYearSelect('fec-year');
     populateYearSelect('cloture-year');
     populateYearSelect('liasse-year');
+    populateYearSelect('rapport-gestion-year');
     const year = document.getElementById('cloture-year').value;
     const meta = getExerciceMeta(year);
     const cr = computeCompteResultat(year);
