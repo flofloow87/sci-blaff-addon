@@ -285,7 +285,7 @@
   .q-sign .line{ margin-top:38px; border-top:1px solid var(--ink); width:180px; padding-top:4px; font-family:var(--mono); font-size:0.7rem; color:var(--sage);}
 
   @media print{
-    header, nav, .bottom-nav, .top-nav-select, .no-print{ display:none !important; }
+    header, nav, .bottom-nav, .top-nav-select, .compta-subnav-select, .no-print{ display:none !important; }
     body{ background:white; }
     .quittance-preview{ border:none; margin:0; max-width:100%; }
     main{ padding:0; }
@@ -328,11 +328,13 @@
   select[multiple]{ min-height:70px; }
 
   /* ==== Comptabilité ==== */
-  .compta-subnav{
-    display:flex; flex-wrap:nowrap; overflow-x:auto; gap:4px; margin-bottom:24px;
-    padding:5px; background:var(--paper2); border:1px solid var(--line); border-radius:12px;
-    -webkit-overflow-scrolling:touch; scrollbar-width:thin;
-  }
+  /* La rangée d'onglets à défilement horizontal (.compta-subnav) est remplacée par
+     un menu déroulant natif dans toutes les tailles d'écran, comme la navigation
+     principale : plus simple à parcourir qu'une liste qui déborde et qu'il faut
+     faire défiler au clic ou au doigt. Le HTML des boutons original reste en place
+     (masqué) : le <select> pilote un clic programmatique dessus, sans dupliquer la
+     logique de changement de sous-onglet. */
+  .compta-subnav{ display:none; }
   .compta-subnav button{
     display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap;
     font-family:var(--display); font-size:0.7rem; letter-spacing:0.3px; text-transform:uppercase; font-weight:600;
@@ -342,7 +344,20 @@
   .compta-subnav button svg{ width:14px; height:14px; flex-shrink:0; }
   .compta-subnav button:hover{ opacity:1; background:rgba(251,251,248,0.7); }
   .compta-subnav button.active{ opacity:1; font-weight:700; background:var(--ink); color:var(--white); box-shadow:0 2px 6px rgba(21,40,69,0.28); }
-  .compta-subnav-select{ display:none; margin-bottom:24px; font-weight:700; }
+  .compta-subnav-select{
+    display:block; width:100%; margin-bottom:24px; box-sizing:border-box;
+    padding:12px 40px 12px 16px;
+    font-family:var(--display); font-size:0.78rem; font-weight:700; letter-spacing:0.3px; text-transform:uppercase;
+    color:var(--ink); background-color:var(--white);
+    border:1px solid var(--line); border-radius:10px; cursor:pointer;
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5.5 8L10 12.5L14.5 8' stroke='%23dd8330' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 16px center; background-size:15px;
+    box-shadow:0 2px 8px rgba(21,40,69,0.06);
+    transition:border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .compta-subnav-select:hover{ border-color:var(--brick); }
+  .compta-subnav-select:focus{ outline:none; border-color:var(--brick); box-shadow:0 0 0 3px rgba(221,131,48,0.15); }
   .compta-sub{ display:none; }
   .compta-sub.active{ display:block; }
   .kpi-card{ background:var(--white); border:1px solid var(--line); border-left:5px solid var(--sage); padding:16px; }
@@ -384,8 +399,6 @@
   @media (max-width:720px){
     .top-nav-select{ display:none; }
     .bottom-nav{ display:flex; }
-    .compta-subnav{ display:none; }
-    .compta-subnav-select{ display:block; }
     main{ padding-bottom:calc(90px + env(safe-area-inset-bottom)); }
 
     input, select, textarea{ font-size:16px; }
