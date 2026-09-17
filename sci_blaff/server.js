@@ -331,6 +331,35 @@ app.post('/api/extract-facture', requireAuth, async (req, res) => {
   }
 });
 
+// --- Rapport de gestion annuel (IA) ---
+// Rédige un texte de synthèse pour l'assemblée générale à partir des chiffres
+// déjà calculés côté client (compte de résultat, bilan, occupation, alertes) :
+// aucun accès direct à la base, aucune donnée inventée par le modèle.
+const RAPPORT_GESTION_SYSTEM = `Tu rédiges un rapport de gestion annuel pour l'associé-gérant d'une SCI soumise à l'impôt sur les sociétés, destiné à l'assemblée générale annuelle. Base-toi UNIQUEMENT sur les chiffres fournis dans le message : n'invente aucune donnée, aucun montant, aucune date. Style français professionnel mais accessible, sans jargon comptable inutile. Structure le texte en sections avec des titres courts en MAJUSCULES (pas de markdown, pas de #, pas de **). Sections attendues, dans cet ordre : ACTIVITE LOCATIVE, SITUATION FINANCIERE, FAITS MARQUANTS DE L'EXERCICE, POINTS DE VIGILANCE, PERSPECTIVES. Reste factuel et concis (300 à 500 mots au total).`;
+
+app.post('/api/rapport-gestion', requireAuth, async (req, res) => {
+  if (!anthropicClient) {
+    return res.status(503).json({ error: "Génération IA non configurée (option 'anthropic_api_key' vide)." });
+  }
+  const { annee, donnees } = req.body || {};
+  if (!annee || !donnees) return res.status(400).json({ error: 'Données manquantes.' });
+
+  try {
+    const response = await anthropicClient.messages.create({
+      model: 'claude-opus-5',
+      max_tokens: 8000,
+      system: RAPPORT_GESTION_SYSTEM,
+      messages: [{ role: 'user', content: `Exercice ${annee}. Données :\n${JSON.stringify(donnees, null, 2)}` }]
+    });
+    const textBlock = response.content.find(b => b.type === 'text');
+    if (!textBlock) throw new Error('Réponse vide.');
+    res.json({ rapport: textBlock.text });
+  } catch (err) {
+    console.error('[rapport-gestion] erreur:', err);
+    res.status(500).json({ error: "Échec de la génération du rapport : " + err.message });
+  }
+});
+
 // --- Envoi automatique des quittances par email (SMTP) ---
 // Permet un envoi en un clic depuis l'app : sans configuration SMTP, le
 // client repasse sur le mode manuel (téléchargement + mailto pré-rempli).
