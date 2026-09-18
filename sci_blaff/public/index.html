@@ -1504,6 +1504,21 @@
     });
   }
 
+  // Redessine les graphiques Chart.js une fois la police web réellement chargée
+  // (Google Fonts, chargée en arrière-plan avec repli visuel immédiat via
+  // display=swap) : sans ça, Chart.js peut mesurer la largeur de l'axe Y avec la
+  // police de repli juste avant le changement de police, et le texte rendu avec
+  // la police finale déborde du cadre réservé — surtout visible au premier
+  // chargement, sur le graphique du tableau de bord.
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(()=>{
+      try{
+        if(document.getElementById('view-dashboard').classList.contains('active') && typeof renderDashboardCharts === 'function') renderDashboardCharts();
+        if(document.getElementById('view-accounting').classList.contains('active') && typeof renderComptaBoard === 'function') renderComptaBoard();
+      }catch(e){}
+    });
+  }
+
   // ---------- NOTIFICATIONS & CONFIRMATIONS ----------
   // Remplacent window.alert / window.confirm, silencieusement bloqués par certains
   // navigateurs dans un cadre <iframe> sécurisé — exactement le contexte dans lequel
