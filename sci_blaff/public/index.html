@@ -260,10 +260,14 @@
   label{ display:block; font-family:var(--mono); font-size:0.68rem; text-transform:uppercase; letter-spacing:1px; color:var(--sage); margin-bottom:5px;}
   input, select, textarea{
     width:100%; padding:9px 10px; border:1px solid var(--line); background:var(--paper);
-    font-family:var(--serif); font-size:0.95rem; color:var(--ink);
+    font-family:var(--serif); font-size:0.95rem; color:var(--ink); box-sizing:border-box;
   }
   input:focus, select:focus, textarea:focus{ outline:2px solid var(--gold); outline-offset:1px; background:var(--surface);}
   textarea{ resize:vertical; min-height:70px; }
+  /* Sur iOS Safari, un input type="date"/"month" peut ignorer width:100% et
+     déborder de son propre conteneur (l'affichage natif du contrôle ne respecte
+     pas toujours la largeur assignée) — un max-width explicite force la limite. */
+  input[type="date"], input[type="month"]{ max-width:100%; }
 
   /* ==== Dropzone (glisser-déposer un fichier) ==== */
   .dropzone{
