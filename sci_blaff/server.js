@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
+const rateLimit = require('express-rate-limit');
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -176,10 +177,27 @@ setInterval(() => {
 // App Express
 // ---------------------------------------------------------------------------
 const app = express();
+// L'app est toujours servie derrière un reverse proxy (Ingress HA et/ou Nginx
+// Proxy Manager, cf. Dockerfile) : on ne fait confiance qu'au premier hop pour
+// lire X-Forwarded-For, afin que le rate limiting ci-dessous cible bien l'IP
+// du visiteur plutôt que celle du proxy (qui serait partagée par tout le monde).
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '150mb' })); // marge pour les pièces jointes en base64 et la restauration complète d'une sauvegarde
 
 // --- Auth ---
-app.post('/api/auth/login', (req, res) => {
+// Protection anti brute-force : 5 tentatives échouées max par IP / 15 min.
+// Les connexions réussies ne sont pas comptées, donc un usage normal n'est
+// jamais bloqué.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Trop de tentatives de connexion. Réessaie dans 15 minutes.' }
+});
+
+app.post('/api/auth/login', loginLimiter, (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis.' });
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(String(email).toLowerCase().trim());
