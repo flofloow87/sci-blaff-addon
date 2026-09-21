@@ -1,7 +1,7 @@
 // ============================================================================
 // Serveur auto-hébergé — Registre locatif SCI BLAFF
-// Remplace Firebase : authentification par mot de passe + stockage SQLite,
-// le tout hébergé chez vous, sans dépendance externe.
+// Remplace Firebase : authentification via "Se connecter avec Google" +
+// stockage SQLite, le tout hébergé chez vous, sans dépendance externe.
 // ============================================================================
 
 const express = require('express');
@@ -12,6 +12,12 @@ const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
 const rateLimit = require('express-rate-limit');
+
+// Échappement HTML minimal pour les rares pages d'erreur en HTML brut de ce
+// fichier (ex. rejet de connexion Google) où une valeur externe est affichée.
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -74,23 +80,26 @@ try {
 // ---------------------------------------------------------------------------
 // Bootstrap : premier compte admin créé depuis les variables d'environnement,
 // uniquement si la table users est vide (premier démarrage).
+// La connexion se fait exclusivement via Google (voir plus bas) : le mot de
+// passe n'est plus utilisé pour l'authentification. La colonne password_hash
+// reste NOT NULL pour compatibilité de schéma, donc on y stocke soit le hash
+// d'ADMIN_PASSWORD s'il est encore renseigné, soit un hash aléatoire inutilisable.
 // ---------------------------------------------------------------------------
 const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
 if (userCount === 0) {
   const adminEmail = process.env.ADMIN_EMAIL;
   const adminPassword = process.env.ADMIN_PASSWORD;
   const adminName = process.env.ADMIN_NAME || 'Admin';
-  if (!adminEmail || !adminPassword) {
+  if (!adminEmail) {
     console.error('╔══════════════════════════════════════════════════════════════════╗');
-    console.error('║ ERREUR : aucun compte utilisateur et ADMIN_EMAIL / ADMIN_PASSWORD  ║');
-    console.error('║ ne sont pas définis. Ajoutez-les dans docker-compose.yml puis      ║');
-    console.error('║ redémarrez le conteneur.                                           ║');
+    console.error('║ ERREUR : aucun compte utilisateur et ADMIN_EMAIL n\'est pas défini. ║');
+    console.error('║ Ajoutez-le dans les options de l\'add-on puis redémarrez.           ║');
     console.error('╚══════════════════════════════════════════════════════════════════╝');
   } else {
-    const hash = bcrypt.hashSync(adminPassword, 10);
+    const hash = bcrypt.hashSync(adminPassword || crypto.randomBytes(32).toString('hex'), 10);
     db.prepare('INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?,?,?,?,?)')
       .run(crypto.randomUUID(), adminEmail.toLowerCase(), hash, adminName, new Date().toISOString());
-    console.log(`✓ Compte admin créé : ${adminEmail}`);
+    console.log(`✓ Compte admin créé : ${adminEmail} (connexion via Google avec cette adresse)`);
   }
 }
 
@@ -185,28 +194,9 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '150mb' })); // marge pour les pièces jointes en base64 et la restauration complète d'une sauvegarde
 
 // --- Auth ---
-// Protection anti brute-force : 5 tentatives échouées max par IP / 15 min.
-// Les connexions réussies ne sont pas comptées, donc un usage normal n'est
-// jamais bloqué.
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skipSuccessfulRequests: true,
-  message: { error: 'Trop de tentatives de connexion. Réessaie dans 15 minutes.' }
-});
-
-app.post('/api/auth/login', loginLimiter, (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis.' });
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(String(email).toLowerCase().trim());
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
-  }
-  const token = createSession(user.id);
-  res.json({ token, user: { email: user.email, name: user.name } });
-});
+// La connexion se fait exclusivement via Google (voir la section OAuth plus
+// bas, routes /api/auth/google/*) : il n'y a plus de mot de passe à saisir
+// ni à brute-forcer. Voir plus bas pour le flux complet.
 
 app.post('/api/auth/logout', requireAuth, (req, res) => {
   const authHeader = req.headers.authorization || '';
@@ -219,35 +209,25 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
 
-app.post('/api/auth/change-password', requireAuth, (req, res) => {
-  const { currentPassword, newPassword } = req.body || {};
-  if (!currentPassword || !newPassword || newPassword.length < 6) {
-    return res.status(400).json({ error: 'Mot de passe actuel requis et nouveau mot de passe d\'au moins 6 caractères.' });
-  }
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  if (!bcrypt.compareSync(currentPassword, user.password_hash)) {
-    return res.status(401).json({ error: 'Mot de passe actuel incorrect.' });
-  }
-  const hash = bcrypt.hashSync(newPassword, 10);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.user.id);
-  res.json({ ok: true });
-});
-
 // Gestion des comptes associés (n'importe quel utilisateur connecté peut gérer les
 // comptes des autres associés — cohérent avec le reste de l'app, pensée pour une
 // petite SCI familiale de confiance, pas un système multi-rôles complexe).
+// Un compte ici ne fait qu'autoriser une adresse Google à se connecter : il n'y
+// a pas de mot de passe, la vérification d'identité est entièrement déléguée à
+// Google lors du login (voir /api/auth/google/callback).
 app.get('/api/users', requireAuth, (req, res) => {
   const users = db.prepare('SELECT id, email, name, created_at FROM users').all();
   res.json({ users });
 });
 
 app.post('/api/users', requireAuth, (req, res) => {
-  const { email, password, name } = req.body || {};
-  if (!email || !password || !name) return res.status(400).json({ error: 'Email, mot de passe et nom requis.' });
-  if (password.length < 6) return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caractères.' });
+  const { email, name } = req.body || {};
+  if (!email || !name) return res.status(400).json({ error: 'Email et nom requis.' });
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
   if (existing) return res.status(409).json({ error: 'Un compte existe déjà avec cet email.' });
-  const hash = bcrypt.hashSync(password, 10);
+  // password_hash reste NOT NULL pour compatibilité de schéma mais n'est plus
+  // utilisé : la connexion se fait uniquement via Google, sur la base de l'email.
+  const hash = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10);
   const id = crypto.randomUUID();
   db.prepare('INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?,?,?,?,?)')
     .run(id, email.toLowerCase().trim(), hash, name, new Date().toISOString());
@@ -610,6 +590,126 @@ app.get(GOOGLE_REDIRECT_URI_PATH, async (req, res) => {
   } catch (err) {
     res.status(500).send('Erreur lors de l\'échange du code OAuth : ' + err.message);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Connexion à l'application via "Se connecter avec Google" (remplace le login
+// par mot de passe). Flux OAuth "Authorization Code" classique avec un jeton
+// d'identité (openid) : Google authentifie la personne, on vérifie le jeton
+// auprès de Google puis on n'autorise l'accès que si l'email vérifié
+// correspond à un compte déjà créé dans l'onglet "Comptes" de l'app — se
+// connecter avec Google ne crée jamais de compte tout seul.
+//
+// Le jeton de session final n'est jamais mis dans une URL : le callback ne
+// renvoie qu'un code d'échange à usage unique, valable 60 secondes, que le
+// client échange ensuite via une requête POST classique (voir /exchange).
+// ---------------------------------------------------------------------------
+const GOOGLE_LOGIN_REDIRECT_PATH = '/api/auth/google/callback';
+
+function getGoogleLoginRedirectUri() {
+  if (!APP_DOMAIN) throw new Error("Option 'domain' non configurée : indispensable pour la connexion Google (Google exige une URL de redirection fixe).");
+  return `https://${APP_DOMAIN}${GOOGLE_LOGIN_REDIRECT_PATH}`;
+}
+
+const pendingLoginStates = new Map();   // state (anti-CSRF) -> expiresAt
+const pendingLoginHandoffs = new Map(); // code d'échange à usage unique -> { userId, expiresAt }
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, expiresAt] of pendingLoginStates) if (expiresAt < now) pendingLoginStates.delete(k);
+  for (const [k, v] of pendingLoginHandoffs) if (v.expiresAt < now) pendingLoginHandoffs.delete(k);
+}, 5 * 60 * 1000);
+
+// Limite le nombre de tentatives de connexion Google par IP — défense en
+// profondeur, pas une nécessité stricte (le code Google et le code d'échange
+// sont déjà des secrets à usage unique imprévisibles).
+const googleAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives de connexion. Réessaie dans 15 minutes.' }
+});
+
+app.get('/api/auth/google/start', googleAuthLimiter, (req, res) => {
+  if (!GOOGLE_CLIENT_ID) {
+    return res.status(503).send("Connexion Google non configurée (renseigne d'abord google_client_id / google_client_secret dans les options de l'add-on).");
+  }
+  const state = crypto.randomBytes(24).toString('hex');
+  pendingLoginStates.set(state, Date.now() + 10 * 60 * 1000);
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: getGoogleLoginRedirectUri(),
+    response_type: 'code',
+    scope: 'openid email',
+    state,
+    prompt: 'select_account'
+  });
+  res.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + params.toString());
+});
+
+app.get(GOOGLE_LOGIN_REDIRECT_PATH, googleAuthLimiter, async (req, res) => {
+  const { code, state } = req.query;
+  if (!state || !pendingLoginStates.has(state)) {
+    return res.status(400).send('Session de connexion expirée ou invalide. Reviens à l\'écran de connexion et réessaie.');
+  }
+  pendingLoginStates.delete(state); // à usage unique, qu'il réussisse ou non
+  if (!code) return res.status(400).send('Autorisation refusée ou paramètre "code" manquant.');
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: getGoogleLoginRedirectUri(),
+        grant_type: 'authorization_code'
+      }).toString()
+    });
+    const tokenBody = await tokenRes.json();
+    if (!tokenBody.id_token) {
+      return res.status(400).send('Échec de la connexion Google : ' + JSON.stringify(tokenBody));
+    }
+    // Vérification du jeton d'identité auprès de Google elle-même (signature,
+    // audience, expiration) plutôt qu'un décodage local du JWT — plus simple
+    // et suffisant pour le volume de connexions d'une petite app familiale.
+    const verifyRes = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(tokenBody.id_token));
+    const claims = await verifyRes.json();
+    if (!verifyRes.ok || claims.aud !== GOOGLE_CLIENT_ID || claims.email_verified !== 'true' || !claims.email) {
+      return res.status(401).send('Jeton Google invalide ou email non vérifié.');
+    }
+    const email = String(claims.email).toLowerCase().trim();
+    const user = db.prepare('SELECT id, name FROM users WHERE email = ?').get(email);
+    if (!user) {
+      return res.status(403).send(
+        `<h2>Accès refusé</h2><p>Le compte Google <strong>${escHtml(email)}</strong> n'est associé à aucun compte de l'application.</p>` +
+        `<p>Demande à un administrateur de créer ton compte dans l'onglet Paramètres → Comptes, avec cette même adresse email, puis réessaie.</p>`
+      );
+    }
+    const handoffCode = crypto.randomBytes(24).toString('hex');
+    pendingLoginHandoffs.set(handoffCode, { userId: user.id, expiresAt: Date.now() + 60 * 1000 });
+    res.redirect('/?g=' + handoffCode);
+  } catch (err) {
+    res.status(500).send('Erreur lors de la connexion Google : ' + err.message);
+  }
+});
+
+// Échange le code d'échange à usage unique (reçu dans l'URL de redirection)
+// contre le vrai jeton de session, via une requête POST classique — le jeton
+// de session final n'apparaît donc jamais dans une URL, un log serveur ou
+// l'historique du navigateur.
+app.post('/api/auth/google/exchange', (req, res) => {
+  const { code } = req.body || {};
+  const pending = code && pendingLoginHandoffs.get(code);
+  pendingLoginHandoffs.delete(code); // à usage unique dans tous les cas
+  if (!pending || pending.expiresAt < Date.now()) {
+    return res.status(401).json({ error: 'Code de connexion invalide ou expiré.' });
+  }
+  const user = db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(pending.userId);
+  if (!user) return res.status(401).json({ error: 'Compte introuvable.' });
+  const token = createSession(user.id);
+  res.json({ token, user: { email: user.email, name: user.name } });
 });
 
 let cachedGoogleToken = null; // { token, expiresAt }

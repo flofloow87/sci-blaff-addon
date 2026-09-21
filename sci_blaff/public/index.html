@@ -604,14 +604,13 @@
   <div class="login-box">
     <img id="loginLogoImg" alt="BLAFF" style="height:52px; width:auto; margin-bottom:18px;">
     <h2>Registre locatif SCI BLAFF</h2>
-    <p class="helper" style="margin-bottom:18px;">Connecte-toi avec le compte qui t'a été créé.</p>
+    <p class="helper" style="margin-bottom:18px;">Connecte-toi avec le compte Google associé à ton compte de l'application.</p>
     <div id="loginError" class="login-error" style="display:none;"></div>
-    <label>Email</label>
-    <input type="email" id="login-email" autocomplete="username">
-    <label style="margin-top:12px;">Mot de passe</label>
-    <input type="password" id="login-password" autocomplete="current-password">
     <div class="btn-row" style="margin-top:16px;">
-      <button class="btn" id="loginBtn" style="width:100%; justify-content:center;">Se connecter</button>
+      <button class="btn" id="googleLoginBtn" style="width:100%; justify-content:center; gap:10px;">
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.94v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.69 9c0-.6.1-1.18.28-1.72V4.95H.94A9 9 0 0 0 0 9c0 1.45.35 2.83.94 4.05z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.46 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .94 4.95l3.03 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+        Se connecter avec Google
+      </button>
     </div>
   </div>
 </div>
@@ -1338,25 +1337,12 @@
     </div>
 
     <div class="panel">
-      <div class="panel-title">Changer mon mot de passe</div>
-      <div class="field-row">
-        <div><label>Mot de passe actuel</label><input type="password" id="cp-current"></div>
-        <div><label>Nouveau mot de passe</label><input type="password" id="cp-new"></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn secondary" id="changePasswordBtn">Mettre à jour</button>
-        <span class="helper" id="changePasswordMsg" style="align-self:center;"></span>
-      </div>
-    </div>
-
-    <div class="panel">
       <div class="panel-title">Comptes de connexion des associés</div>
-      <p class="helper" style="margin-bottom:12px;">Crée ici un compte (email + mot de passe) pour chaque associé qui doit pouvoir se connecter à l'app.</p>
+      <p class="helper" style="margin-bottom:12px;">Crée ici un compte pour chaque associé qui doit pouvoir se connecter à l'app. La connexion se fait avec Google : indique simplement l'adresse email de son compte Google, sans mot de passe.</p>
       <div id="usersList"></div>
       <div class="field-row" style="margin-top:14px;">
         <div><label>Nom</label><input id="nu-name"></div>
-        <div><label>Email</label><input type="email" id="nu-email"></div>
-        <div><label>Mot de passe</label><input type="password" id="nu-password"></div>
+        <div><label>Email (compte Google)</label><input type="email" id="nu-email"></div>
       </div>
       <div class="btn-row">
         <button class="btn" id="createUserBtn">Créer le compte</button>
@@ -1731,44 +1717,41 @@
     renderQuittances();
   }
 
-  document.getElementById('loginBtn').addEventListener('click', async ()=>{
-    const email = document.getElementById('login-email').value.trim();
-    const password = document.getElementById('login-password').value;
-    const errEl = document.getElementById('loginError');
-    errEl.style.display = 'none';
-    if(!email || !password){
-      errEl.textContent = 'Merci de renseigner email et mot de passe.';
-      errEl.style.display = 'block';
-      return;
-    }
-    const btn = document.getElementById('loginBtn');
-    btn.disabled = true; btn.textContent = 'Connexion…';
+  document.getElementById('googleLoginBtn').addEventListener('click', ()=>{
+    // Navigation de page classique (pas un fetch) : le flux OAuth de Google
+    // exige une vraie redirection de navigateur, avec retour ensuite sur /.
+    window.location.href = API_BASE + 'api/auth/google/start';
+  });
+
+  // Après le retour du callback Google, la page se recharge sur /?g=<code> :
+  // on échange ce code à usage unique contre le vrai jeton de session via une
+  // requête POST (jamais dans l'URL), puis on nettoie l'URL affichée.
+  async function tryConsumeGoogleHandoff(){
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('g');
+    if(!code) return false;
+    history.replaceState(null, '', window.location.pathname);
     try{
-      const res = await fetch(API_BASE + 'api/auth/login', {
+      const res = await fetch(API_BASE + 'api/auth/google/exchange', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ code })
       });
       const body = await res.json().catch(()=>({}));
-      if(!res.ok) throw new Error(body.error || 'Erreur de connexion.');
+      if(!res.ok) throw new Error(body.error || 'Échec de la connexion Google.');
       setToken(body.token);
-      document.getElementById('login-email').value = '';
-      document.getElementById('login-password').value = '';
       await showApp(body.user);
+      return true;
     }catch(err){
-      errEl.textContent = err.message || 'Erreur de connexion.';
-      errEl.style.display = 'block';
-    } finally {
-      btn.disabled = false; btn.textContent = 'Se connecter';
+      showLoginScreen(err.message || 'Échec de la connexion Google.');
+      return true;
     }
-  });
+  }
 
-  document.getElementById('login-password').addEventListener('keydown', (e)=>{
-    if(e.key === 'Enter') document.getElementById('loginBtn').click();
-  });
-
-  // Reprise de session au chargement si un token est déjà stocké sur cet appareil
+  // Reprise de session au chargement : d'abord un éventuel retour de connexion
+  // Google, sinon un token déjà stocké sur cet appareil.
   (async function tryResumeSession(){
+    if(await tryConsumeGoogleHandoff()) return;
     const token = getToken();
     if(!token) return;
     try{
@@ -3688,23 +3671,6 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     showLoginScreen();
   });
 
-  document.getElementById('changePasswordBtn').addEventListener('click', async ()=>{
-    const currentPassword = document.getElementById('cp-current').value;
-    const newPassword = document.getElementById('cp-new').value;
-    const msg = document.getElementById('changePasswordMsg');
-    msg.textContent = '';
-    if(!currentPassword || !newPassword){ msg.textContent = 'Remplis les deux champs.'; return; }
-    try{
-      await api('api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) });
-      document.getElementById('cp-current').value = '';
-      document.getElementById('cp-new').value = '';
-      msg.textContent = '✓ Mot de passe mis à jour';
-      setTimeout(()=> msg.textContent = '', 3000);
-    }catch(err){
-      msg.textContent = '✕ ' + err.message;
-    }
-  });
-
   async function renderUsersList(){
     const wrap = document.getElementById('usersList');
     if(!wrap) return;
@@ -3742,15 +3708,13 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
   document.getElementById('createUserBtn').addEventListener('click', async ()=>{
     const name = document.getElementById('nu-name').value.trim();
     const email = document.getElementById('nu-email').value.trim();
-    const password = document.getElementById('nu-password').value;
     const msg = document.getElementById('createUserMsg');
     msg.textContent = '';
-    if(!name || !email || !password){ msg.textContent = 'Remplis les trois champs.'; return; }
+    if(!name || !email){ msg.textContent = 'Remplis les deux champs.'; return; }
     try{
-      await api('api/users', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+      await api('api/users', { method: 'POST', body: JSON.stringify({ name, email }) });
       document.getElementById('nu-name').value = '';
       document.getElementById('nu-email').value = '';
-      document.getElementById('nu-password').value = '';
       msg.textContent = '✓ Compte créé';
       logActivity(`Compte de connexion créé : ${name}`);
       saveData();

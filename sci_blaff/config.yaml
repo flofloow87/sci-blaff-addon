@@ -1,5 +1,5 @@
 name: "SCI BLAFF — Registre locatif"
-version: "4.3.7"
+version: "4.4.0"
 slug: "sci_blaff"
 description: "Registre locatif auto-hébergé pour la SCI BLAFF (baux, quittances, comptabilité, comptes des associés)"
 url: "https://github.com/flo/sci-blaff-addon"
@@ -16,8 +16,12 @@ panel_icon: mdi:home-city-outline
 panel_title: "SCI BLAFF"
 options:
   admin_email: ""
+  # admin_password n'est plus utilisé pour se connecter (connexion exclusivement
+  # via Google, sur la base de admin_email) : conservé optionnel pour compatibilité.
   admin_password: ""
   admin_name: "Flo"
+  # domain, google_client_id et google_client_secret sont désormais obligatoires :
+  # la connexion à l'app se fait uniquement via "Se connecter avec Google".
   domain: ""
   export_api_key: ""
   google_client_id: ""
@@ -31,12 +35,12 @@ options:
   smtp_from: ""
 schema:
   admin_email: "email"
-  admin_password: "password"
+  admin_password: "password?"
   admin_name: "str"
-  domain: "str?"
+  domain: "str"
   export_api_key: "str?"
-  google_client_id: "str?"
-  google_client_secret: "password?"
+  google_client_id: "str"
+  google_client_secret: "password"
   google_drive_folder_id: "str?"
   anthropic_api_key: "password?"
   smtp_host: "str?"
