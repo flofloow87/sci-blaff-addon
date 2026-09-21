@@ -631,12 +631,43 @@ const googleAuthLimiter = rateLimit({
   message: { error: 'Trop de tentatives de connexion. Réessaie dans 15 minutes.' }
 });
 
+const OAUTH_STATE_COOKIE = 'sci_oauth_state';
+
+// Pas de cookie-parser installé (inutile ailleurs dans l'app, qui n'utilise
+// que des jetons Bearer) : on ne lit qu'un seul cookie ici, un parsing minimal
+// suffit.
+function readCookie(req, name) {
+  const header = req.headers.cookie || '';
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === name) return decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return null;
+}
+
 app.get('/api/auth/google/start', googleAuthLimiter, (req, res) => {
   if (!GOOGLE_CLIENT_ID) {
     return res.status(503).send("Connexion Google non configurée (renseigne d'abord google_client_id / google_client_secret dans les options de l'add-on).");
   }
   const state = crypto.randomBytes(24).toString('hex');
   pendingLoginStates.set(state, Date.now() + 10 * 60 * 1000);
+  // Le state est à la fois gardé côté serveur ET posé dans un cookie
+  // httpOnly/Secure sur le navigateur qui démarre le flux : sans ce cookie,
+  // un attaquant qui intercepte un couple (code, state) valide (le sien,
+  // obtenu en démarrant lui-même une connexion Google) pourrait le rejouer
+  // dans un lien envoyé à quelqu'un d'autre pour connecter SON navigateur à
+  // la place — la simple présence du state dans un Map partagé côté serveur
+  // ne suffit pas à empêcher ce rejeu inter-navigateurs (CSRF de connexion).
+  // Exiger la correspondance avec un cookie propre au navigateur qui a
+  // initié le flux ferme cette porte.
+  res.cookie(OAUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    maxAge: 10 * 60 * 1000,
+    path: GOOGLE_LOGIN_REDIRECT_PATH
+  });
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: getGoogleLoginRedirectUri(),
@@ -650,7 +681,9 @@ app.get('/api/auth/google/start', googleAuthLimiter, (req, res) => {
 
 app.get(GOOGLE_LOGIN_REDIRECT_PATH, googleAuthLimiter, async (req, res) => {
   const { code, state } = req.query;
-  if (!state || !pendingLoginStates.has(state)) {
+  const cookieState = readCookie(req, OAUTH_STATE_COOKIE);
+  res.clearCookie(OAUTH_STATE_COOKIE, { path: GOOGLE_LOGIN_REDIRECT_PATH });
+  if (!state || !cookieState || state !== cookieState || !pendingLoginStates.has(state)) {
     return res.status(400).send('Session de connexion expirée ou invalide. Reviens à l\'écran de connexion et réessaie.');
   }
   pendingLoginStates.delete(state); // à usage unique, qu'il réussisse ou non
