@@ -1867,6 +1867,15 @@
   function fmtDate(d){ if(!d) return '—'; const [y,m,day]=d.split('-'); return `${day}/${m}/${y}`; }
   function lotsLabel(){ const n = DATA.apartments.length; return `${n} lot${n>1?'s':''}`; }
 
+  // Échappe les caractères HTML spéciaux avant d'insérer une donnée saisie par un
+  // utilisateur (nom de locataire, libellé, adresse…) dans du innerHTML — sans ça,
+  // une valeur du type "<img src=x onerror=...>" s'exécute telle quelle chez
+  // quiconque affiche ensuite cette fiche. Toujours appliquer à un texte libre ;
+  // jamais nécessaire sur un nombre déjà formaté (fmtEUR) ou une date (fmtDate).
+  function esc(s){
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  }
+
   function activeLeaseForApt(aptId){
     return DATA.leases.find(l => l.aptId === aptId && l.status !== 'terminated');
   }
@@ -1919,7 +1928,7 @@
         const x = buildingLeft + i*(unitW+unitGap);
         const winW = Math.min(30, unitW*0.16);
         out += `
-          <g class="bldg-unit" data-apt="${apt.id}" tabindex="0" role="button" aria-label="${apt.label}, ${occ ? 'occupé par '+lease.tenant : 'vacant'}">
+          <g class="bldg-unit" data-apt="${apt.id}" tabindex="0" role="button" aria-label="${esc(apt.label)}, ${occ ? 'occupé par '+esc(lease.tenant) : 'vacant'}">
             <rect class="bldg-row" x="${x}" y="${y}" width="${unitW}" height="${unitH}"></rect>
             <rect class="bldg-flag ${occ?'occ':'vac'}" x="${x}" y="${y}" width="${unitW}" height="6"></rect>
             <rect class="bldg-win ${occ?'lit':'dark'}" x="${x+unitW-winW-14}" y="${y+18}" width="${winW}" height="${winW*1.3}"></rect>
@@ -1927,8 +1936,8 @@
               ? `<rect class="bldg-door" x="${x+unitW/2-11}" y="${y+unitH-36}" width="22" height="36"></rect><circle class="bldg-doorknob" cx="${x+unitW/2+6}" cy="${y+unitH-18}" r="1.6"></circle>`
               : `<rect class="bldg-win ${occ?'lit':'dark'}" x="${x+14}" y="${y+unitH-40}" width="${winW}" height="${winW*1.3}"></rect>`
             }
-            <text class="bldg-label" x="${x+14}" y="${y+30}">${apt.label.toUpperCase()}${apt.surface ? ' · '+apt.surface+' M²' : ''}</text>
-            <text class="bldg-tenant" x="${x+14}" y="${y+50}">${occ ? lease.tenant : 'Vacant — disponible'}</text>
+            <text class="bldg-label" x="${x+14}" y="${y+30}">${esc(apt.label.toUpperCase())}${apt.surface ? ' · '+esc(apt.surface)+' M²' : ''}</text>
+            <text class="bldg-tenant" x="${x+14}" y="${y+50}">${occ ? esc(lease.tenant) : 'Vacant — disponible'}</text>
             ${occ ? `<text class="bldg-rent" x="${x+unitW-14}" y="${y+unitH-12}" text-anchor="end">${fmtEUR(Number(lease.loyer)+Number(lease.charges||0))}/mois</text>` : ''}
           </g>
         `;
@@ -1986,7 +1995,7 @@
       recentWrap.innerHTML = '<div class="empty">Aucune quittance générée pour l\'instant.</div>';
     } else {
       recentWrap.innerHTML = `<table><thead><tr><th>Locataire</th><th>Mois</th><th>Montant</th><th>Statut</th></tr></thead><tbody>
-        ${recent.map(q=>`<tr><td>${q.tenant}</td><td>${q.monthLabel}</td><td>${fmtEUR(q.total)}</td><td><span class="tag-pill ${q.datePaid?'paid':'due'}">${q.datePaid?'Payée':'En attente'}</span></td></tr>`).join('')}
+        ${recent.map(q=>`<tr><td>${esc(q.tenant)}</td><td>${esc(q.monthLabel)}</td><td>${fmtEUR(q.total)}</td><td><span class="tag-pill ${q.datePaid?'paid':'due'}">${q.datePaid?'Payée':'En attente'}</span></td></tr>`).join('')}
       </tbody></table>`;
     }
   }
@@ -2062,10 +2071,10 @@
       const diagAlerte = pireDiagStatus(apt);
       card.innerHTML = `
         <div class="status-dot"></div>
-        <div class="apt-label">${apt.label}</div>
-        <h3>${lease ? lease.tenant : 'Vacant'}</h3>
+        <div class="apt-label">${esc(apt.label)}</div>
+        <h3>${lease ? esc(lease.tenant) : 'Vacant'}</h3>
         <div class="meta">
-          ${apt.surface ? apt.surface+' m²<br>':''}
+          ${apt.surface ? esc(apt.surface)+' m²<br>':''}
           ${lease ? `Bail depuis ${fmtDate(lease.start)}<br>${fmtEUR(Number(lease.loyer)+Number(lease.charges||0))}/mois` : 'Disponible à la location'}
           ${diagAlerte ? `<br><span class="diag-status ${diagAlerte}">${diagAlerte==='danger'?'Diagnostic expiré':'Diagnostic à renouveler'}</span>` : ''}
         </div>
@@ -2081,14 +2090,14 @@
     const history = DATA.leases.filter(l=>l.aptId===aptId);
     const content = document.getElementById('aptModalContent');
     content.innerHTML = `
-      <h3 style="margin-top:0">${apt.label}</h3>
+      <h3 style="margin-top:0">${esc(apt.label)}</h3>
       ${lease ? `
-        <p><strong>${lease.tenant}</strong><br>
-        ${lease.email||''} ${lease.phone? ' · '+lease.phone : ''}<br>
-        Entrée le ${fmtDate(lease.start)} — ${lease.duree}<br>
+        <p><strong>${esc(lease.tenant)}</strong><br>
+        ${esc(lease.email||'')} ${lease.phone? ' · '+esc(lease.phone) : ''}<br>
+        Entrée le ${fmtDate(lease.start)} — ${esc(lease.duree)}<br>
         Loyer : ${fmtEUR(lease.loyer)} + ${fmtEUR(lease.charges)} charges = <strong>${fmtEUR(Number(lease.loyer)+Number(lease.charges))}</strong><br>
         Dépôt de garantie : ${fmtEUR(lease.depot)}<br>
-        ${lease.notes ? '<br><em>'+lease.notes+'</em>':''}
+        ${lease.notes ? '<br><em>'+esc(lease.notes)+'</em>':''}
         </p>
         <div class="btn-row">
           <button class="btn secondary small" onclick="window.__terminateLease('${lease.id}')">Marquer le bail comme terminé</button>
@@ -2154,7 +2163,7 @@
     wrap.innerHTML = diags.length===0 ? '<div class="empty">Aucun diagnostic enregistré.</div>' : diags.map(d=>{
       const st = diagStatus(d);
       return `<div class="alerte-item ${st==='ok'?'':st}">
-        <span>${d.type}${d.dateExpiration ? ' — expire le '+fmtDate(d.dateExpiration) : (d.dateRealisation ? ' — réalisé le '+fmtDate(d.dateRealisation) : '')}</span>
+        <span>${esc(d.type)}${d.dateExpiration ? ' — expire le '+fmtDate(d.dateExpiration) : (d.dateRealisation ? ' — réalisé le '+fmtDate(d.dateRealisation) : '')}</span>
         <span>
           <span class="diag-status ${st}">${diagStatusLabel(st)}</span>
           ${d.attachments && d.attachments.length ? `<button class="btn secondary small" onclick="window.__downloadAttachment('${aptId}','${d.attachments[0].id}')">Voir</button>` : ''}
@@ -2271,8 +2280,8 @@
       ${sorted.map(l=>{
         const apt = DATA.apartments.find(a=>a.id===l.aptId);
         return `<tr>
-          <td>${apt?apt.label:'—'}</td>
-          <td>${l.tenant}</td>
+          <td>${apt?esc(apt.label):'—'}</td>
+          <td>${esc(l.tenant)}</td>
           <td>${fmtDate(l.start)}</td>
           <td>${fmtEUR(Number(l.loyer)+Number(l.charges))}</td>
           <td><span class="tag-pill ${l.status==='active'?'paid':'due'}">${l.status==='active'?'Actif':'Terminé'}</span></td>
@@ -2374,11 +2383,11 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         <div class="field-row">
           <div>
             <label>Loyer actuel (€)</label>
-            <input id="irl-loyer-actuel-${leaseId}" value="${lease.loyer}" type="number" step="0.01">
+            <input id="irl-loyer-actuel-${leaseId}" value="${esc(lease.loyer)}" type="number" step="0.01">
           </div>
           <div>
             <label>Ancien indice IRL</label>
-            <input id="irl-ancien-${leaseId}" value="${lease.irlValeur||''}" placeholder="ex. 145,20">
+            <input id="irl-ancien-${leaseId}" value="${esc(lease.irlValeur||'')}" placeholder="ex. 145,20">
           </div>
           <div>
             <label>Nouvel indice IRL</label>
@@ -2386,7 +2395,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
           </div>
           <div>
             <label>Nouveau trimestre de référence</label>
-            <input id="irl-trim-${leaseId}" value="${lease.irlTrimestre||''}" placeholder="ex. 2ème trimestre 2027">
+            <input id="irl-trim-${leaseId}" value="${esc(lease.irlTrimestre||'')}" placeholder="ex. 2ème trimestre 2027">
           </div>
         </div>
         <div class="btn-row">
@@ -2452,7 +2461,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         <div class="panel-title">Pièces jointes — état des lieux, attestation d'assurance…</div>
         <div id="attList-${leaseId}">
           ${atts.length === 0 ? '<div class="empty">Aucune pièce jointe pour ce bail.</div>' : `<table><thead><tr><th>Fichier</th><th>Ajouté le</th><th></th></tr></thead><tbody>
-            ${atts.map(a=>`<tr><td>${a.name}</td><td>${new Date(a.uploadedAt).toLocaleDateString('fr-FR')}</td><td>
+            ${atts.map(a=>`<tr><td>${esc(a.name)}</td><td>${new Date(a.uploadedAt).toLocaleDateString('fr-FR')}</td><td>
               <button class="btn secondary small" onclick="window.__downloadAttachment('${leaseId}','${a.id}')">Télécharger</button>
               <button class="btn danger small" onclick="window.__deleteAttachment('${leaseId}','${a.id}')">Supprimer</button>
             </td></tr>`).join('')}
@@ -2563,24 +2572,24 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const apt = DATA.apartments.find(a=>a.id===lease.aptId) || {};
     const sci = DATA.sci;
     const isNu = lease.type === 'nu';
-    const adresseLogement = `${sci.immeuble ? sci.immeuble+' — ' : ''}${apt.label}${apt.etage ? ' ('+apt.etage+')' : ''}`;
+    const adresseLogement = `${sci.immeuble ? esc(sci.immeuble)+' — ' : ''}${esc(apt.label)}${apt.etage ? ' ('+esc(apt.etage)+')' : ''}`;
     const finBailNote = isNu ? "Le contrat se renouvelle tacitement à son terme pour la même durée, sauf congé délivré dans les formes et délais légaux." :
       "À l'expiration du bail, le contrat se poursuit tacitement dans les mêmes conditions par périodes d'un an, sauf congé délivré par l'une des parties.";
 
     const tokens = {
       TYPE_LOCATION_LABEL: isNu ? "à usage d'habitation nu" : "à usage d'habitation meublé",
       ADRESSE_LOGEMENT: adresseLogement,
-      PIECES: lease.pieces || '_',
-      SURFACE_LIGNE: lease.surface ? ` pour une surface habitable de ${lease.surface} m² (loi Carrez / Boutin)` : '',
-      EQUIPEMENTS_LIGNE: lease.equipements ? `Équipements et dépendances : ${lease.equipements}.<br>` : '',
-      CHAUFFAGE: lease.chauffage || 'non précisé',
-      DPE: lease.dpe || '__',
-      DUREE: lease.duree,
+      PIECES: esc(lease.pieces) || '_',
+      SURFACE_LIGNE: lease.surface ? ` pour une surface habitable de ${esc(lease.surface)} m² (loi Carrez / Boutin)` : '',
+      EQUIPEMENTS_LIGNE: lease.equipements ? `Équipements et dépendances : ${esc(lease.equipements)}.<br>` : '',
+      CHAUFFAGE: esc(lease.chauffage) || 'non précisé',
+      DPE: esc(lease.dpe) || '__',
+      DUREE: esc(lease.duree),
       DATE_DEBUT: fmtDateLong(lease.start),
       FIN_BAIL_NOTE: finBailNote,
       LOYER: fmtEUR(lease.loyer),
-      JOUR_PAIEMENT: lease.jourPaiement || '1',
-      IRL_LIGNE: lease.irlTrimestre ? ` Indice de référence retenu : ${lease.irlTrimestre}${lease.irlValeur ? ' ('+lease.irlValeur+')' : ''}.` : '',
+      JOUR_PAIEMENT: esc(lease.jourPaiement) || '1',
+      IRL_LIGNE: lease.irlTrimestre ? ` Indice de référence retenu : ${esc(lease.irlTrimestre)}${lease.irlValeur ? ' ('+esc(lease.irlValeur)+')' : ''}.` : '',
       CHARGES_PARAGRAPHE: lease.chargesMode === 'forfait'
         ? `Les charges locatives sont incluses sous forme de forfait mensuel de <strong>${fmtEUR(lease.charges)}</strong>, non régularisable, s'ajoutant au loyer.`
         : `Le Locataire versera, en sus du loyer, une provision mensuelle sur charges de <strong>${fmtEUR(lease.charges)}</strong>, faisant l'objet d'une régularisation annuelle au vu des dépenses réelles, conformément à l'article 23 de la loi du 6 juillet 1989.`,
@@ -2588,9 +2597,9 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       DEPOT: fmtEUR(lease.depot),
       DEPOT_LIMITE_TEXTE: isNu ? " (dans la limite légale d'un mois de loyer hors charges)" : " (dans la limite légale de deux mois de loyer hors charges)",
       GARANT_CLAUSE: lease.garant
-        ? `${lease.garant} se porte caution solidaire du Locataire pour l'exécution de l'ensemble des obligations résultant du présent contrat, dans les conditions prévues par un acte de cautionnement annexé aux présentes.`
+        ? `${esc(lease.garant)} se porte caution solidaire du Locataire pour l'exécution de l'ensemble des obligations résultant du présent contrat, dans les conditions prévues par un acte de cautionnement annexé aux présentes.`
         : `Sans objet — aucun garant n'est renseigné pour ce bail.`,
-      NOTES_CLAUSE: lease.notes ? lease.notes : `Aucune mention particulière.`
+      NOTES_CLAUSE: lease.notes ? esc(lease.notes) : `Aucune mention particulière.`
     };
 
     const articlesHtml = fillBailTemplate(DATA.bailTemplate || DEFAULT_BAIL_ARTICLES, tokens);
@@ -2604,9 +2613,9 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
           </div>
           <div style="text-align:right; font-size:0.8rem; display:flex; align-items:flex-start; gap:10px;">
             <div>
-              <strong>${sci.name || 'SCI'}</strong><br>
-              ${sci.adresse||''}<br>
-              ${sci.siret ? 'SIRET '+sci.siret : ''}
+              <strong>${esc(sci.name) || 'SCI'}</strong><br>
+              ${esc(sci.adresse)}<br>
+              ${sci.siret ? 'SIRET '+esc(sci.siret) : ''}
             </div>
             <img src="data:image/png;base64,${window.__logoB64}" style="height:38px; width:auto;">
           </div>
@@ -2614,14 +2623,14 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
 
         <div class="q-body" style="font-size:0.88rem; line-height:1.65;">
           <p><strong>ENTRE LES SOUSSIGNÉS :</strong></p>
-          <p><strong>${sci.name || '[Nom de la SCI]'}</strong>, société civile immobilière au capital de ${sci.capital ? fmtEUR(sci.capital) : '[capital social]'}${sci.siret ? ', SIRET '+sci.siret : ''}, dont le siège social est situé ${sci.adresse || '[adresse du siège]'}, représentée par ${sci.gerant || '[nom du/des gérant(s)]'}, agissant en qualité de gérant(s) ayant tous pouvoirs à cet effet,<br>
+          <p><strong>${esc(sci.name) || '[Nom de la SCI]'}</strong>, société civile immobilière au capital de ${sci.capital ? fmtEUR(sci.capital) : '[capital social]'}${sci.siret ? ', SIRET '+esc(sci.siret) : ''}, dont le siège social est situé ${esc(sci.adresse) || '[adresse du siège]'}, représentée par ${esc(sci.gerant) || '[nom du/des gérant(s)]'}, agissant en qualité de gérant(s) ayant tous pouvoirs à cet effet,<br>
           ci-après dénommée « <strong>le Bailleur</strong> »,</p>
           <p><strong>D'UNE PART,</strong></p>
           <p>ET :</p>
-          <p><strong>${lease.tenant || '[Nom du locataire]'}</strong>${lease.tenantNaissance ? ', né(e) le '+fmtDateLong(lease.tenantNaissance) : ''}${lease.email ? ', joignable à '+lease.email : ''}${lease.phone ? ', tél. '+lease.phone : ''},<br>
+          <p><strong>${esc(lease.tenant) || '[Nom du locataire]'}</strong>${lease.tenantNaissance ? ', né(e) le '+fmtDateLong(lease.tenantNaissance) : ''}${lease.email ? ', joignable à '+esc(lease.email) : ''}${lease.phone ? ', tél. '+esc(lease.phone) : ''},<br>
           ci-après dénommé(e) « <strong>le Locataire</strong> »,</p>
           <p><strong>D'AUTRE PART,</strong></p>
-          ${lease.garant ? `<p>Avec l'intervention de <strong>${lease.garant}</strong>, se portant caution solidaire du Locataire dans les conditions fixées à l'article 10 ci-dessous.</p>` : ''}
+          ${lease.garant ? `<p>Avec l'intervention de <strong>${esc(lease.garant)}</strong>, se portant caution solidaire du Locataire dans les conditions fixées à l'article 10 ci-dessous.</p>` : ''}
 
           <p><strong>IL A ÉTÉ CONVENU CE QUI SUIT :</strong></p>
 
@@ -2633,13 +2642,13 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         <div class="q-sign">
           <div>
             <img src="data:image/png;base64,${window.__signatureB64}" style="height:44px; width:auto; display:block; margin-bottom:-6px;">
-            <div class="line" style="margin-top:6px;">Le Bailleur${sci.gerant ? ' ('+sci.gerant+')' : ''}</div>
+            <div class="line" style="margin-top:6px;">Le Bailleur${sci.gerant ? ' ('+esc(sci.gerant)+')' : ''}</div>
           </div>
           <div>
-            <div class="line">Le Locataire (${lease.tenant})</div>
+            <div class="line">Le Locataire (${esc(lease.tenant)})</div>
           </div>
         </div>
-        ${lease.garant ? `<div class="q-sign"><div><div class="line">La Caution (${lease.garant})</div></div><div></div></div>` : ''}
+        ${lease.garant ? `<div class="q-sign"><div><div class="line">La Caution (${esc(lease.garant)})</div></div><div></div></div>` : ''}
       </div>
     `;
   }
@@ -2955,9 +2964,9 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const sorted = [...DATA.quittances].sort((a,b)=> b.month.localeCompare(a.month) || b.createdAt.localeCompare(a.createdAt));
     wrap.innerHTML = `<table><thead><tr><th>Locataire</th><th>Lot</th><th>Mois</th><th>Montant</th><th>Statut</th><th></th></tr></thead><tbody>
       ${sorted.map(q=>`<tr>
-        <td>${q.tenant}</td>
-        <td>${q.aptLabel}</td>
-        <td>${q.monthLabel}</td>
+        <td>${esc(q.tenant)}</td>
+        <td>${esc(q.aptLabel)}</td>
+        <td>${esc(q.monthLabel)}</td>
         <td>${fmtEUR(q.total)}</td>
         <td><span class="tag-pill ${q.datePaid?'paid':'due'}">${q.datePaid?'Payée '+fmtDate(q.datePaid):'En attente'}</span>${q.emailSentAt ? ` <span class="tag-pill" style="background:var(--gold)">✉ ${q.emailSentMode==='sent'?'envoyée':'préparée'}</span>` : ''}</td>
         <td>
@@ -3074,7 +3083,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     panel.style.display='block';
     list.innerHTML = alertes.map(a=>`
       <div class="alerte-item ${a.level}">
-        <span>${a.text}</span>
+        <span>${esc(a.text)}</span>
         ${a.action ? `<button class="alerte-action" onclick="window.__goToView('${a.action.view}')">${a.action.label} →</button>` : ''}
       </div>
     `).join('');
@@ -3153,7 +3162,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     panel.style.display='block';
     list.innerHTML = anomalies.map(a=>`
       <div class="alerte-item warning">
-        <span>${a.text}</span>
+        <span>${esc(a.text)}</span>
         ${a.action ? `<button class="alerte-action" onclick="window.__goToView('${a.action.view}')">${a.action.label} →</button>` : ''}
       </div>
     `).join('');
@@ -3172,9 +3181,9 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       ${sorted.map(q=>{
         const lease = DATA.leases.find(l=>l.id===q.leaseId);
         return `<tr>
-          <td>${q.tenant}</td>
-          <td>${q.aptLabel}</td>
-          <td>${q.monthLabel}</td>
+          <td>${esc(q.tenant)}</td>
+          <td>${esc(q.aptLabel)}</td>
+          <td>${esc(q.monthLabel)}</td>
           <td>${fmtEUR(q.total)}</td>
           <td>${lease && lease.email ? `<button class="btn danger small" onclick="window.__sendReminder('${q.id}')">Relancer par email</button>` : `<span class="helper">Pas d'email</span>`}</td>
         </tr>`;
@@ -3320,15 +3329,15 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       <div class="field-row" style="margin-bottom:10px; align-items:end;">
         <div>
           <label>Nom</label>
-          <input value="${a.name}" onchange="window.__updateAssocie('${a.id}','name',this.value)">
+          <input value="${esc(a.name)}" onchange="window.__updateAssocie('${a.id}','name',this.value)">
         </div>
         <div>
           <label>Email (compte de connexion)</label>
-          <input type="email" value="${a.email||''}" onchange="window.__updateAssocie('${a.id}','email',this.value)">
+          <input type="email" value="${esc(a.email||'')}" onchange="window.__updateAssocie('${a.id}','email',this.value)">
         </div>
         <div>
           <label>Part (%)</label>
-          <input type="number" step="0.01" value="${a.part}" onchange="window.__updateAssocie('${a.id}','part',this.value)">
+          <input type="number" step="0.01" value="${esc(a.part)}" onchange="window.__updateAssocie('${a.id}','part',this.value)">
         </div>
         <div style="align-self:center;">
           <button class="btn danger small" onclick="window.__removeAssocie('${a.id}')">Retirer</button>
@@ -3377,7 +3386,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     let html = `<table><thead><tr><th>Lot</th><th>Quittances encaissées</th><th>Total perçu</th>${hasValeur?'<th>Rendement brut</th>':''}</tr></thead><tbody>`;
     Object.values(summary.byApt).forEach(row=>{
       const rendement = row.valeurAcquisition>0 ? (row.total/row.valeurAcquisition*100).toFixed(2)+' %' : '—';
-      html += `<tr><td>${row.label}</td><td>${row.count}</td><td>${fmtEUR(row.total)}</td>${hasValeur?`<td>${rendement}</td>`:''}</tr>`;
+      html += `<tr><td>${esc(row.label)}</td><td>${row.count}</td><td>${fmtEUR(row.total)}</td>${hasValeur?`<td>${rendement}</td>`:''}</tr>`;
     });
     html += `<tr style="font-weight:bold;"><td>Total</td><td>${summary.count}</td><td>${fmtEUR(summary.grandTotal)}</td>${hasValeur?'<td></td>':''}</tr>`;
     html += `</tbody></table>`;
@@ -3417,10 +3426,10 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     wrap.innerHTML = log.slice(0,50).map(entry => `
       <div class="log-entry">
         <div class="log-head">
-          <span>${entry.who}</span>
+          <span>${esc(entry.who)}</span>
           <span>${new Date(entry.at).toLocaleString('fr-FR')}</span>
         </div>
-        <div>${entry.action}</div>
+        <div>${esc(entry.action)}</div>
       </div>
     `).join('');
   }
@@ -3436,11 +3445,11 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     wrap.innerHTML = DATA.emailLog.map(entry => `
       <div class="log-entry ${entry.status==='error' ? 'error':''}">
         <div class="log-head">
-          <span>${labels[entry.status] || '… En cours'} — ${entry.to}</span>
+          <span>${labels[entry.status] || '… En cours'} — ${esc(entry.to)}</span>
           <span>${new Date(entry.at).toLocaleString('fr-FR')}</span>
         </div>
-        <div>${entry.subject || ''}</div>
-        ${entry.detail ? `<details><summary>Détail</summary><pre>${(entry.detail+'').replace(/</g,'&lt;')}</pre></details>` : ''}
+        <div>${esc(entry.subject) || ''}</div>
+        ${entry.detail ? `<details><summary>Détail</summary><pre>${esc(entry.detail)}</pre></details>` : ''}
       </div>
     `).join('');
   }
@@ -3545,13 +3554,13 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         <div class="q-head">
           <div>
             <h3>Quittance de loyer</h3>
-            <div class="q-num">${q.monthLabel}</div>
+            <div class="q-num">${esc(q.monthLabel)}</div>
           </div>
           <div style="text-align:right; font-size:0.8rem; display:flex; align-items:flex-start; gap:10px;">
             <div>
-              <strong>${sci.name || 'SCI'}</strong><br>
-              ${sci.adresse||''}<br>
-              ${sci.siret ? 'SIRET '+sci.siret : ''}
+              <strong>${esc(sci.name) || 'SCI'}</strong><br>
+              ${esc(sci.adresse)}<br>
+              ${sci.siret ? 'SIRET '+esc(sci.siret) : ''}
             </div>
             <img src="data:image/png;base64,${window.__logoB64}" style="height:38px; width:auto;">
           </div>
@@ -3559,15 +3568,15 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
         <div class="q-parties">
           <div>
             <div class="lbl">Bailleur</div>
-            ${sci.name||'—'}${sci.gerant ? ', représentée par '+sci.gerant : ''}
+            ${esc(sci.name)||'—'}${sci.gerant ? ', représentée par '+esc(sci.gerant) : ''}
           </div>
           <div>
             <div class="lbl">Locataire</div>
-            ${q.tenant}<br>${apt.label||''} ${sci.immeuble ? '— '+sci.immeuble : ''}
+            ${esc(q.tenant)}<br>${esc(apt.label)} ${sci.immeuble ? '— '+esc(sci.immeuble) : ''}
           </div>
         </div>
         <div class="q-body">
-          <p>Je soussigné(e), représentant ${sci.name || 'la SCI'}, bailleur, déclare avoir reçu de <strong>${q.tenant}</strong>, locataire du logement ${apt.label||''}${sci.immeuble ? ' situé '+sci.immeuble : ''}, la somme de <strong>${fmtEUR(q.total)}</strong> au titre du loyer et des charges du mois de <strong>${q.monthLabel}</strong>, et lui en donne quittance, sous réserve de tous mes droits.</p>
+          <p>Je soussigné(e), représentant ${esc(sci.name) || 'la SCI'}, bailleur, déclare avoir reçu de <strong>${esc(q.tenant)}</strong>, locataire du logement ${esc(apt.label)}${sci.immeuble ? ' situé '+esc(sci.immeuble) : ''}, la somme de <strong>${fmtEUR(q.total)}</strong> au titre du loyer et des charges du mois de <strong>${esc(q.monthLabel)}</strong>, et lui en donne quittance, sous réserve de tous mes droits.</p>
         </div>
         <div class="q-amount">
           <div>Loyer : ${fmtEUR(q.loyer)}<br>Charges : ${fmtEUR(q.charges)}</div>
@@ -3614,11 +3623,11 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       <div class="field-row" style="margin-bottom:10px; align-items:end;">
         <div>
           <label>Nom du lot</label>
-          <input value="${apt.label}" onchange="window.__updateApt('${apt.id}','label',this.value)">
+          <input value="${esc(apt.label)}" onchange="window.__updateApt('${apt.id}','label',this.value)">
         </div>
         <div>
           <label>Surface (m²)</label>
-          <input value="${apt.surface}" onchange="window.__updateApt('${apt.id}','surface',this.value)">
+          <input value="${esc(apt.surface)}" onchange="window.__updateApt('${apt.id}','surface',this.value)">
         </div>
         <div>
           <label>Emplacement</label>
@@ -3701,13 +3710,14 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     if(!wrap) return;
     try{
       const body = await api('api/users');
+      window.__usersCache = body.users;
       if(body.users.length === 0){
         wrap.innerHTML = '<div class="empty">Aucun compte pour l\'instant.</div>';
         return;
       }
       wrap.innerHTML = `<table><thead><tr><th>Nom</th><th>Email</th><th></th></tr></thead><tbody>
-        ${body.users.map(u=>`<tr><td>${u.name}</td><td>${u.email}</td><td>
-          ${u.email===window.__currentAuthEmail ? '<span class="helper">(toi)</span>' : `<button class="btn danger small" onclick="window.__deleteUser('${u.id}','${u.name}')">Supprimer</button>`}
+        ${body.users.map(u=>`<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>
+          ${u.email===window.__currentAuthEmail ? '<span class="helper">(toi)</span>' : `<button class="btn danger small" onclick="window.__deleteUser('${u.id}')">Supprimer</button>`}
         </td></tr>`).join('')}
       </tbody></table>`;
     }catch(err){
@@ -3715,7 +3725,9 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     }
   }
 
-  window.__deleteUser = async function(id, name){
+  window.__deleteUser = async function(id){
+    const u = (window.__usersCache||[]).find(x=>x.id===id);
+    const name = u ? u.name : '';
     if(!(await confirmDialog(`Supprimer le compte de ${name} ? Cette personne ne pourra plus se connecter.`))) return;
     try{
       await api('api/users/' + id, { method: 'DELETE' });
@@ -3793,8 +3805,8 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const docs = DATA.sci.documents || [];
     wrap.innerHTML = docs.length===0 ? '<div class="empty">Aucun document enregistré.</div>' : `<table><thead><tr><th>Type</th><th>Fichier</th><th>Ajouté le</th><th></th></tr></thead><tbody>
       ${docs.map(d=>`<tr>
-        <td>${SCI_DOC_LABELS[d.type]||d.type}</td>
-        <td>${d.attachment ? d.attachment.name : '—'}</td>
+        <td>${esc(SCI_DOC_LABELS[d.type]||d.type)}</td>
+        <td>${d.attachment ? esc(d.attachment.name) : '—'}</td>
         <td>${fmtDate(d.uploadedAt.slice(0,10))}</td>
         <td>
           ${d.attachment ? `<button class="btn secondary small" onclick="window.__downloadAttachment('sci-doc','${d.attachment.id}')">Télécharger</button>` : ''}
@@ -3857,8 +3869,8 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
           : st==='warning' ? '<span class="tag-pill" style="background:var(--gold)">Bientôt due</span>'
           : '<span class="tag-pill" style="background:var(--sage-solid)">À venir</span>';
         return `<tr>
-          <td>${CHARGE_OBLIGATOIRE_LABELS[x.type]||x.type}</td>
-          <td>${x.libelle}</td>
+          <td>${esc(CHARGE_OBLIGATOIRE_LABELS[x.type]||x.type)}</td>
+          <td>${esc(x.libelle)}</td>
           <td class="num-col">${fmtEUR(x.montant)}</td>
           <td>${x.dateEcheance ? fmtDate(x.dateEcheance) : '—'}</td>
           <td>${statusHtml}</td>
@@ -4604,7 +4616,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
           <option value="fournisseur">Fournisseur (à payer plus tard)</option>
           <option value="cc">Associé sur ses fonds propres (compte courant)</option>
         </select></div>
-        <div id="qc-associe-wrap" style="display:none;"><label>Associé</label><select id="qc-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name}</option>`).join('')}</select></div>
+        <div id="qc-associe-wrap" style="display:none;"><label>Associé</label><select id="qc-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${esc(a.name)}">${esc(a.name)}</option>`).join('')}</select></div>
       </div>
       <div class="btn-row"><button class="btn" id="qc-submit">Enregistrer</button></div>
     `);
@@ -4782,7 +4794,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     openComptaModal(`
       <h3 style="margin-top:0">Apport en compte courant</h3>
       <div class="field-row">
-        <div><label>Associé</label><select id="qcc-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name}</option>`).join('')}</select></div>
+        <div><label>Associé</label><select id="qcc-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${esc(a.name)}">${esc(a.name)}</option>`).join('')}</select></div>
         <div><label>Date</label><input type="date" id="qcc-date" value="${todayISO()}"></div>
         <div><label>Montant (€)</label><input type="number" step="0.01" id="qcc-montant"></div>
       </div>
@@ -4806,7 +4818,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     openComptaModal(`
       <h3 style="margin-top:0">Remboursement de compte courant</h3>
       <div class="field-row">
-        <div><label>Associé</label><select id="qrc-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name} (solde : ${fmtEUR(ccAssocieSolde(a.id))})</option>`).join('')}</select></div>
+        <div><label>Associé</label><select id="qrc-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${esc(a.name)}">${esc(a.name)} (solde : ${fmtEUR(ccAssocieSolde(a.id))})</option>`).join('')}</select></div>
         <div><label>Date</label><input type="date" id="qrc-date" value="${todayISO()}"></div>
         <div><label>Montant (€)</label><input type="number" step="0.01" id="qrc-montant"></div>
       </div>
@@ -4845,7 +4857,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       const montant = Number(document.getElementById('qd-montant').value)||0;
       const totalPart = (DATA.associes||[]).reduce((s,a)=>s+Number(a.part||0),0)||100;
       document.getElementById('qd-repartition').innerHTML = `<table class="compact"><thead><tr><th>Associé</th><th>Part</th><th class="num-col">Montant</th></tr></thead><tbody>
-        ${(DATA.associes||[]).map(a=>`<tr><td>${a.name}</td><td>${a.part}%</td><td class="num-col">${fmtEUR(montant*Number(a.part||0)/totalPart)}</td></tr>`).join('')}
+        ${(DATA.associes||[]).map(a=>`<tr><td>${esc(a.name)}</td><td>${a.part}%</td><td class="num-col">${fmtEUR(montant*Number(a.part||0)/totalPart)}</td></tr>`).join('')}
       </tbody></table>`;
     }
     document.getElementById('qd-montant').addEventListener('input', renderRepartition);
@@ -4873,7 +4885,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     openComptaModal(`
       <h3 style="margin-top:0">Verser un dividende voté</h3>
       <div class="field-row">
-        <div><label>Associé</label><select id="qvd-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name} (dû : ${fmtEUR(dividendeDuAssocie(a.id))})</option>`).join('')}</select></div>
+        <div><label>Associé</label><select id="qvd-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${esc(a.name)}">${esc(a.name)} (dû : ${fmtEUR(dividendeDuAssocie(a.id))})</option>`).join('')}</select></div>
         <div><label>Date</label><input type="date" id="qvd-date" value="${todayISO()}"></div>
         <div><label>Montant (€)</label><input type="number" step="0.01" id="qvd-montant"></div>
       </div>
@@ -4984,22 +4996,22 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     openComptaModal(`
       <h3 style="margin-top:0">${existing ? 'Modifier' : 'Ajouter'} une immobilisation</h3>
       <div class="field-row">
-        <div><label>Libellé</label><input id="qi-libelle" value="${existing ? existing.libelle : ''}" placeholder="Ex : Immeuble 12 rue…"></div>
+        <div><label>Libellé</label><input id="qi-libelle" value="${existing ? esc(existing.libelle) : ''}" placeholder="Ex : Immeuble 12 rue…"></div>
         <div><label>Composant</label><select id="qi-type">
           <option value="construction" ${existing && existing.compte==='213000' ? 'selected':''}>Construction</option>
           <option value="agencement" ${existing && existing.compte==='218100' ? 'selected':''}>Agencement / installation</option>
         </select></div>
       </div>
       <div class="field-row">
-        <div><label>Date d'acquisition</label><input type="date" id="qi-date-acq" value="${existing ? existing.dateAcquisition : todayISO()}"></div>
-        <div><label>Date de mise en service</label><input type="date" id="qi-date-service" value="${existing ? (existing.dateMiseEnService||existing.dateAcquisition) : todayISO()}"></div>
+        <div><label>Date d'acquisition</label><input type="date" id="qi-date-acq" value="${existing ? esc(existing.dateAcquisition) : todayISO()}"></div>
+        <div><label>Date de mise en service</label><input type="date" id="qi-date-service" value="${existing ? esc(existing.dateMiseEnService||existing.dateAcquisition) : todayISO()}"></div>
       </div>
       <div class="field-row">
-        <div><label>Valeur du terrain (non amortissable, € — 0 si aucun)</label><input type="number" step="0.01" id="qi-terrain" value="${existing ? existing.valeurTerrain||0 : 0}"></div>
-        <div><label>Valeur amortissable (construction/agencement, €)</label><input type="number" step="0.01" id="qi-amortissable" value="${existing ? existing.valeurAmortissable||'' : ''}"></div>
+        <div><label>Valeur du terrain (non amortissable, € — 0 si aucun)</label><input type="number" step="0.01" id="qi-terrain" value="${existing ? esc(existing.valeurTerrain||0) : 0}"></div>
+        <div><label>Valeur amortissable (construction/agencement, €)</label><input type="number" step="0.01" id="qi-amortissable" value="${existing ? esc(existing.valeurAmortissable||'') : ''}"></div>
       </div>
       <div class="field-row">
-        <div><label>Durée d'amortissement (années)</label><input type="number" id="qi-duree" value="${existing ? existing.dureeAns : 25}"></div>
+        <div><label>Durée d'amortissement (années)</label><input type="number" id="qi-duree" value="${existing ? esc(existing.dureeAns) : 25}"></div>
         ${!existing ? `<div><label>Financement initial</label><select id="qi-financement"><option value="512000">Banque</option><option value="164000">Emprunt (montant total financé par emprunt)</option><option value="none">Ne pas générer d'écriture (déjà enregistré)</option></select></div>` : ''}
       </div>
       <p class="compta-note">Durées usuelles : 20 à 30 ans pour une construction, 8 à 15 ans pour des agencements. Le terrain n'est jamais amorti.</p>
@@ -5135,7 +5147,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
             <option value="fournisseur">Fournisseur (à payer plus tard)</option>
             <option value="cc">Associé sur ses fonds propres (compte courant)</option>
           </select></div>
-          <div id="qf-associe-wrap" style="display:none;"><label>Associé</label><select id="qf-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${a.name}">${a.name}</option>`).join('')}</select></div>
+          <div id="qf-associe-wrap" style="display:none;"><label>Associé</label><select id="qf-associe">${(DATA.associes||[]).map(a=>`<option value="${a.id}" data-name="${esc(a.name)}">${esc(a.name)}</option>`).join('')}</select></div>
         </div>
       ` : `
         <div class="field-row">
@@ -5697,7 +5709,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const { headers, rows } = bkParsedData;
     const detected = detectBankColumns(headers);
     const hasDebitCredit = detected.debitIdx>=0 && detected.creditIdx>=0;
-    const opt = (idx) => headers.map((h,i)=>`<option value="${i}" ${i===idx?'selected':''}>${h}</option>`).join('');
+    const opt = (idx) => headers.map((h,i)=>`<option value="${i}" ${i===idx?'selected':''}>${esc(h)}</option>`).join('');
     wrap.style.display='block';
     wrap.innerHTML = `
       <div class="field-row">
@@ -5742,7 +5754,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       const mapping = currentMapping();
       const previewRows = rows.slice(0,5).map(r=>mapRow(r, mapping));
       document.getElementById('bkmap-preview').innerHTML = `<table class="compact"><thead><tr><th>Date</th><th>Libellé</th><th class="num-col">Montant</th></tr></thead><tbody>
-        ${previewRows.map(r=>`<tr><td>${r.date?fmtDate(r.date):'<span style="color:var(--brick-dark)">?</span>'}</td><td>${r.libelle}</td><td class="num-col">${r.montant!=null?fmtEUR(r.montant):'<span style="color:var(--brick-dark)">?</span>'}</td></tr>`).join('')}
+        ${previewRows.map(r=>`<tr><td>${r.date?fmtDate(r.date):'<span style="color:var(--brick-dark)">?</span>'}</td><td>${esc(r.libelle)}</td><td class="num-col">${r.montant!=null?fmtEUR(r.montant):'<span style="color:var(--brick-dark)">?</span>'}</td></tr>`).join('')}
       </tbody></table>`;
     }
     function renderAmountFields(){
@@ -5795,12 +5807,12 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const montantAbs = Math.abs(ligne.montant);
     openComptaModal(`
       <h3 style="margin-top:0">Créer une écriture depuis le relevé</h3>
-      <p class="helper">${fmtDate(ligne.date)} — ${ligne.libelle} — ${fmtEUR(ligne.montant)}</p>
+      <p class="helper">${fmtDate(ligne.date)} — ${esc(ligne.libelle)} — ${fmtEUR(ligne.montant)}</p>
       <div class="field-row">
         <div><label>Nature</label><select id="bke-compte">
-          ${(isEncaissement ? COMPTES_PRODUIT : COMPTES_CHARGE).map(cc=>`<option value="${cc.compte}">${cc.libelle}</option>`).join('')}
+          ${(isEncaissement ? COMPTES_PRODUIT : COMPTES_CHARGE).map(cc=>`<option value="${cc.compte}">${esc(cc.libelle)}</option>`).join('')}
         </select></div>
-        <div><label>Libellé</label><input id="bke-libelle" value="${(ligne.libelle||'').replace(/"/g,'&quot;')}"></div>
+        <div><label>Libellé</label><input id="bke-libelle" value="${esc(ligne.libelle)}"></div>
       </div>
       <div class="btn-row"><button class="btn" id="bke-submit">Enregistrer l'écriture</button></div>
     `);
@@ -5896,7 +5908,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
                 let statusHtml, actionsHtml;
                 if(l.ecritureId){
                   const e = c.ecritures.find(x=>x.id===l.ecritureId);
-                  statusHtml = `<span class="tag-pill paid">Rapprochée${e?' — '+e.libelle:''}</span>`;
+                  statusHtml = `<span class="tag-pill paid">Rapprochée${e?' — '+esc(e.libelle):''}</span>`;
                   actionsHtml = `<button class="btn secondary small" onclick="window.__annulerRapprochementLigne('${r.id}','${l.id}')">Annuler</button>`;
                 } else if(l.ignored){
                   statusHtml = `<span class="tag-pill" style="background:var(--sage-solid)">Ignorée</span>`;
@@ -5905,7 +5917,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
                   statusHtml = `<span class="tag-pill due">À traiter</span>`;
                   actionsHtml = `<button class="btn secondary small" onclick="window.__creerEcritureDepuisReleve('${r.id}','${l.id}')">Créer l'écriture</button> <button class="btn danger small" onclick="window.__ignorerLigneReleve('${r.id}','${l.id}')">Ignorer</button>`;
                 }
-                return `<tr><td>${fmtDate(l.date)}</td><td>${l.libelle}</td><td class="num-col">${fmtEUR(l.montant)}</td><td>${statusHtml}</td><td>${actionsHtml}</td></tr>`;
+                return `<tr><td>${fmtDate(l.date)}</td><td>${esc(l.libelle)}</td><td class="num-col">${fmtEUR(l.montant)}</td><td>${statusHtml}</td><td>${actionsHtml}</td></tr>`;
               }).join('')}
             </tbody></table>
           </div>
@@ -5918,7 +5930,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       const nonPointeesIndy = ecrituresNonPointees('512002');
       const all = [...nonPointeesSG.map(e=>({e,compte:'512001'})), ...nonPointeesIndy.map(e=>({e,compte:'512002'}))].sort((a,b)=> b.e.date.localeCompare(a.e.date));
       npWrap.innerHTML = all.length===0 ? '<div class="empty">Toutes les écritures bancaires sont pointées.</div>' : `<table class="compact"><thead><tr><th>Date</th><th>Compte</th><th>Libellé</th><th class="num-col">Montant</th></tr></thead><tbody>
-        ${all.map(({e,compte})=>`<tr><td>${fmtDate(e.date)}</td><td>${labelCompteBancaire(compte)}</td><td>${e.libelle}</td><td class="num-col">${fmtEUR(ecritureMontantSurCompte(e, compte))}</td></tr>`).join('')}
+        ${all.map(({e,compte})=>`<tr><td>${fmtDate(e.date)}</td><td>${labelCompteBancaire(compte)}</td><td>${esc(e.libelle)}</td><td class="num-col">${fmtEUR(ecritureMontantSurCompte(e, compte))}</td></tr>`).join('')}
       </tbody></table>`;
     }
   }
@@ -5937,12 +5949,12 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     wrap.innerHTML = list.map(e=> `
       <div class="ecriture-block">
         <div class="ecriture-head">
-          <span>#${e.num} · ${fmtDate(e.date)} · ${e.journal} · ${e.piece}</span>
-          <span>${e.libelle}</span>
+          <span>#${e.num} · ${fmtDate(e.date)} · ${esc(e.journal)} · ${esc(e.piece)}</span>
+          <span>${esc(e.libelle)}</span>
           ${!cloture ? `<button class="btn danger small" onclick="window.__deleteEcriture('${e.id}')">Supprimer</button>` : '<span class="badge cloture">Clôturé</span>'}
         </div>
         <table class="compact ecriture-lignes"><tbody>
-          ${e.lignes.map(l=>`<tr><td>${l.compte} — ${compteDef(l.compte).libelle}${l.compAuxLib?' ('+l.compAuxLib+')':''}</td><td class="num-col">${l.debit?fmtEUR(l.debit):''}</td><td class="num-col">${l.credit?fmtEUR(l.credit):''}</td></tr>`).join('')}
+          ${e.lignes.map(l=>`<tr><td>${l.compte} — ${esc(compteDef(l.compte).libelle)}${l.compAuxLib?' ('+esc(l.compAuxLib)+')':''}</td><td class="num-col">${l.debit?fmtEUR(l.debit):''}</td><td class="num-col">${l.credit?fmtEUR(l.credit):''}</td></tr>`).join('')}
         </tbody></table>
       </div>
     `).join('');
@@ -5956,8 +5968,8 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     else {
       wrap.innerHTML = `<table class="compact"><thead><tr><th>Libellé</th><th>Composant</th><th class="num-col">Terrain</th><th class="num-col">Amortissable</th><th>Durée</th><th></th></tr></thead><tbody>
         ${c.immobilisations.map(i=>`<tr>
-          <td>${i.libelle}</td><td>${i.compte==='213000'?'Construction':'Agencement'}</td>
-          <td class="num-col">${fmtEUR(i.valeurTerrain||0)}</td><td class="num-col">${fmtEUR(i.valeurAmortissable)}</td><td>${i.dureeAns} ans</td>
+          <td>${esc(i.libelle)}</td><td>${i.compte==='213000'?'Construction':'Agencement'}</td>
+          <td class="num-col">${fmtEUR(i.valeurTerrain||0)}</td><td class="num-col">${fmtEUR(i.valeurAmortissable)}</td><td>${esc(i.dureeAns)} ans</td>
           <td><button class="btn secondary small" onclick="window.__editImmo('${i.id}')">Modifier</button> <button class="btn danger small" onclick="window.__removeImmo('${i.id}')">Suppr.</button></td>
         </tr>`).join('')}
       </tbody></table>`;
@@ -5970,7 +5982,7 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       ${c.immobilisations.map(i=>{
         const montant = calculDotationAmortissement(i, year);
         const fait = dejaGenere.has(`${i.id}:${year}`);
-        return `<tr><td>${i.libelle}</td><td class="num-col">${fmtEUR(montant)}</td><td>${fait?'✓ enregistrée':(montant>0?'à générer':'—')}</td></tr>`;
+        return `<tr><td>${esc(i.libelle)}</td><td class="num-col">${fmtEUR(montant)}</td><td>${fait?'✓ enregistrée':(montant>0?'à générer':'—')}</td></tr>`;
       }).join('')}
     </tbody></table>`;
   }
@@ -5997,15 +6009,15 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
       <div class="ecriture-block">
         <div class="ecriture-head collapsible" onclick="window.__toggleFactureDetails('${f.id}')">
           <svg class="collapse-chevron ${isOpen?'open':''}" viewBox="0 0 20 20" fill="none"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>${fmtDate(f.date)} · ${f.fournisseur || 'Fournisseur non renseigné'}</span>
-          <span>${f.objet} — ${fmtEUR(f.montant)}</span>
+          <span>${fmtDate(f.date)} · ${esc(f.fournisseur) || 'Fournisseur non renseigné'}</span>
+          <span>${esc(f.objet)} — ${fmtEUR(f.montant)}</span>
           <span class="badge ${f.nature==='immobilisation'?'cloture':'ouvert'}">${f.nature==='immobilisation'?'Immobilisée':'Charge'}</span>
           ${f.attachments.length ? `<span class="helper" style="margin:0;">📎 ${f.attachments.length}</span>` : ''}
           <button class="btn danger small" onclick="event.stopPropagation(); window.__deleteFacture('${f.id}')">Supprimer</button>
         </div>
         <div style="padding:12px; ${isOpen ? '' : 'display:none;'}">
           ${f.attachments.length===0 ? '<div class="empty">Aucun justificatif joint.</div>' : `<table class="compact"><tbody>
-            ${f.attachments.map(a=>`<tr><td>${a.name}</td><td>${fmtDate(a.uploadedAt.slice(0,10))}</td><td>
+            ${f.attachments.map(a=>`<tr><td>${esc(a.name)}</td><td>${fmtDate(a.uploadedAt.slice(0,10))}</td><td>
               <button class="btn secondary small" onclick="window.__downloadAttachment('${f.id}','${a.id}')">Télécharger</button>
               <button class="btn danger small" onclick="window.__deleteFactureAttachment('${f.id}','${a.id}')">Supprimer</button>
             </td></tr>`).join('')}
@@ -6026,13 +6038,13 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     const wrap = document.getElementById('ccAssociesList');
     if(wrap){
       wrap.innerHTML = `<table class="compact"><thead><tr><th>Associé</th><th class="num-col">Solde compte courant</th></tr></thead><tbody>
-        ${(DATA.associes||[]).map(a=>`<tr><td>${a.name}</td><td class="num-col">${fmtEUR(ccAssocieSolde(a.id))}</td></tr>`).join('')}
+        ${(DATA.associes||[]).map(a=>`<tr><td>${esc(a.name)}</td><td class="num-col">${fmtEUR(ccAssocieSolde(a.id))}</td></tr>`).join('')}
       </tbody></table>`;
     }
     const divWrap = document.getElementById('dividendesList');
     if(divWrap){
       divWrap.innerHTML = `<table class="compact"><thead><tr><th>Associé</th><th class="num-col">Dividende dû (non versé)</th></tr></thead><tbody>
-        ${(DATA.associes||[]).map(a=>`<tr><td>${a.name}</td><td class="num-col">${fmtEUR(dividendeDuAssocie(a.id))}</td></tr>`).join('')}
+        ${(DATA.associes||[]).map(a=>`<tr><td>${esc(a.name)}</td><td class="num-col">${fmtEUR(dividendeDuAssocie(a.id))}</td></tr>`).join('')}
       </tbody></table>`;
     }
     renderMouvementsTitres();
@@ -6049,8 +6061,8 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     wrap.innerHTML = items.length===0 ? '<div class="empty">Aucun mouvement enregistré.</div>' : `<table class="compact"><thead><tr><th>Date</th><th>Cédant</th><th>Cessionnaire</th><th>Parts</th><th>Prix</th><th></th></tr></thead><tbody>
       ${items.map(m=>`<tr>
         <td>${fmtDate(m.date)}</td>
-        <td>${m.cedant}</td>
-        <td>${m.cessionnaire}</td>
+        <td>${esc(m.cedant)}</td>
+        <td>${esc(m.cessionnaire)}</td>
         <td class="num-col">${m.nombreParts}</td>
         <td class="num-col">${m.prix ? fmtEUR(m.prix) : '—'}</td>
         <td><button class="btn danger small" onclick="window.__deleteMouvementTitre('${m.id}')">Supprimer</button></td>
@@ -6097,13 +6109,13 @@ Pour l'exécution des présentes, les parties font élection de domicile en leur
     wrap.innerHTML = decisions.map(d=> `
       <div class="ecriture-block">
         <div class="ecriture-head">
-          <span>${fmtDate(d.date)} · ${typeLabel[d.type]||d.type}${d.exercice?' — exercice '+d.exercice:''}</span>
-          <span>${d.libelle}</span>
+          <span>${fmtDate(d.date)} · ${esc(typeLabel[d.type]||d.type)}${d.exercice?' — exercice '+esc(d.exercice):''}</span>
+          <span>${esc(d.libelle)}</span>
           <button class="btn danger small" onclick="window.__deleteDecision('${d.id}')">Supprimer</button>
         </div>
         <div style="padding:12px;">
-          ${d.notes ? `<p class="helper" style="margin:0 0 8px;">${d.notes}</p>` : ''}
-          ${(d.attachments||[]).length ? d.attachments.map(a=>`<button class="btn secondary small" onclick="window.__downloadAttachment('${d.id}','${a.id}')">Voir ${a.name}</button>`).join(' ') : '<span class="helper">Aucun PV joint.</span>'}
+          ${d.notes ? `<p class="helper" style="margin:0 0 8px;">${esc(d.notes)}</p>` : ''}
+          ${(d.attachments||[]).length ? d.attachments.map(a=>`<button class="btn secondary small" onclick="window.__downloadAttachment('${d.id}','${a.id}')">Voir ${esc(a.name)}</button>`).join(' ') : '<span class="helper">Aucun PV joint.</span>'}
         </div>
       </div>
     `).join('');
